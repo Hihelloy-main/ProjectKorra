@@ -126,12 +126,7 @@ public class PaperLib {
 
         @Override
         public CompletableFuture<Chunk> getChunkAtAsync(Block block) {
-            CompletableFuture<Chunk> future = new CompletableFuture<>();
-            ThreadUtil.ensureLocation(block.getLocation(), () -> {
-                Chunk chunk = block.getWorld().getChunkAt(block);
-                future.complete(chunk);
-            });
-            return future;
+            return block.getWorld().getChunkAtAsync(block);
         }
 
         @Override

@@ -100,11 +100,6 @@ public class ProjectKorra extends JavaPlugin {
 		BendingManager bendingManager = new BendingManager();
 		if (!isFolia()) {
 			this.getServer().getScheduler().scheduleSyncRepeatingTask(this, bendingManager, 0, 1);
-			this.getServer().getScheduler().scheduleSyncRepeatingTask(this, new AirbendingManager(this), 0, 1);
-			this.getServer().getScheduler().scheduleSyncRepeatingTask(this, new WaterbendingManager(this), 0, 1);
-			this.getServer().getScheduler().scheduleSyncRepeatingTask(this, new EarthbendingManager(this), 0, 1);
-			this.getServer().getScheduler().scheduleSyncRepeatingTask(this, new FirebendingManager(this), 0, 1);
-			this.getServer().getScheduler().scheduleSyncRepeatingTask(this, new ChiblockingManager(this), 0, 1);
 		}
 
 		this.revertChecker = ThreadUtil.runAsyncTimer(new RevertChecker(this), 0, 200);

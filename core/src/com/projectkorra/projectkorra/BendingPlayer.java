@@ -282,6 +282,13 @@ public class BendingPlayer extends OfflineBendingPlayer {
 	 * @return True if they can bind it
 	 */
 	public boolean canBind(final CoreAbility ability) {
+		if (ProjectKorra.isFolia() && !Bukkit.isOwnedByCurrentRegion(this.getPlayer())) {
+			//Attempt to try check it on the correct thread. If it doesn't return on time, oh well, we would have returned false anyway
+			boolean[] result = new boolean[1];
+			ThreadUtil.ensureEntity(this.getPlayer(), () -> result[0] = this.canBind(ability));
+			return result[0];
+		}
+
 		//Loop through all hooks and test them
 		for (JavaPlugin plugin : BIND_HOOKS.keySet()) {
 			CanBindHook hook = BIND_HOOKS.get(plugin);

@@ -5,6 +5,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import com.projectkorra.projectkorra.ProjectKorra;
 import com.projectkorra.projectkorra.ability.Ability;
+import com.projectkorra.projectkorra.ability.util.RepeatingTask;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
@@ -14,14 +15,18 @@ import com.projectkorra.projectkorra.ability.CoreAbility;
 import com.projectkorra.projectkorra.firebending.HeatControl;
 import com.projectkorra.projectkorra.util.DamageHandler;
 
-public class FireDamageTimer {
+public class FireDamageTimer extends RepeatingTask {
 
 	private static final int MAX_TICKS = 90;
-	private static Ability ability = null;
 	private static final double DAMAGE = 1;
 	private static final long BUFFER = 30;
-	private static final Map<Entity, Player> INSTANCES = new ConcurrentHashMap<>();
-	private static final Map<Entity, Long> TIMES = new ConcurrentHashMap<>();
+	private static final Map<Entity, FireDamageTimer> INSTANCES = new ConcurrentHashMap<>();
+	//private static final Map<Entity, Long> TIMES = new ConcurrentHashMap<>();
+
+	private Entity entity;
+	private Player source;
+	private Ability ability;
+
 
 	/**
 	 * Deprecated. Use FireDamageTimer#FireDamageTimer(final Entity entity, Final Player source, Ability abil)
@@ -39,27 +44,23 @@ public class FireDamageTimer {
 	}
 
 	public FireDamageTimer(final Entity entity, final Player source, Ability abil, final boolean affectSelf) {
-		if (entity.getEntityId() == source.getEntityId() && !affectSelf) {
+        super(source);
+        if (entity.getEntityId() == source.getEntityId() && !affectSelf) {
 			return;
 		}
 
-		INSTANCES.put(entity, source);
-		ability = abil;
+		this.setParentAbility((CoreAbility) ability);
+
+		this.entity = entity;
+		this.ability = abil;
+		this.source = source;
+
+		INSTANCES.put(entity, this);
+		start();
 	}
 
 	public static boolean isEnflamed(final Entity entity) {
-		if (INSTANCES.containsKey(entity)) {
-			if (TIMES.containsKey(entity)) {
-				final long time = TIMES.get(entity);
-				if (System.currentTimeMillis() < time + BUFFER) {
-					return false;
-				}
-			}
-			TIMES.put(entity, System.currentTimeMillis());
-			return true;
-		} else {
-			return false;
-		}
+		return INSTANCES.containsKey(entity);
 	}
 	
 	public static void dealFlameDamage(final Entity entity, final double damage) {
@@ -69,14 +70,15 @@ public class FireDamageTimer {
 					return;
 				}
 			}
+			FireDamageTimer timer = INSTANCES.get(entity);
 			final LivingEntity Lentity = (LivingEntity) entity;
-			final Player source = INSTANCES.get(entity);
+			final Player source = timer.source;
 			
 			// damages the entity.
-			if (ability == null) {
+			if (timer.ability == null) {
 				DamageHandler.damageEntity(Lentity, source, damage, CoreAbility.getAbilitiesByElement(Element.FIRE).get(0), false, true);
 			} else {
-				DamageHandler.damageEntity(Lentity, source, damage, ability, false, true);
+				DamageHandler.damageEntity(Lentity, source, damage, timer.ability, false, true);
 			}
 			
 			if (entity.getFireTicks() > MAX_TICKS) {
@@ -89,23 +91,21 @@ public class FireDamageTimer {
 		dealFlameDamage(entity, DAMAGE);
 	}
 
-	public static void handleFlames() {
-		if (ProjectKorra.isFolia()) return; //TODO REWRITE THIS CLASS TO BE INSTANCE BASED
-
-		for (final Entity entity : INSTANCES.keySet()) {
-			if (entity.getFireTicks() <= 0) {
-				INSTANCES.remove(entity);
-			}
-		}
-	}
-
 	/**
 	 * Util so that players can find benders who were hurt/killed by bending
 	 * fire as opened to regular firetick.
 	 * @return Map from Entity to Player, entity on fire to player who set them
 	 * alight with firebending.
 	 */
-	public static Map<Entity, Player> getInstances() {
+	public static Map<Entity, FireDamageTimer> getInstances() {
 		return INSTANCES;
+	}
+
+	@Override
+	public void progress() {
+		if (this.entity.getFireTicks() <= 0 || !this.entity.isValid() || !(this.entity instanceof LivingEntity)) {
+			INSTANCES.remove(this.entity);
+			remove();
+		}
 	}
 }

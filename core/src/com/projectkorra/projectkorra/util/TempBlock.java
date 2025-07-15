@@ -11,9 +11,11 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+import com.projectkorra.projectkorra.ProjectKorra;
 import com.projectkorra.projectkorra.ability.CoreAbility;
 import com.projectkorra.projectkorra.ability.FireAbility;
 import com.projectkorra.projectkorra.ability.WaterAbility;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -91,12 +93,14 @@ public class TempBlock {
 				updateSnowableBlock(block.getRelative(BlockFace.DOWN),false);
 			}
 		}
+		BlockData finalNewData = newData;
 
 		if (instances_.containsKey(block)) {
 			final TempBlock temp = instances_.get(block).getFirst();
 			this.state = temp.state; //Set the original blockstate of the tempblock
 			put(block, this);
-			block.setBlockData(newData, applyPhysics(newData.getMaterial()));
+
+			ThreadUtil.ensureLocation(block.getLocation(), () -> block.setBlockData(finalNewData, applyPhysics(finalNewData.getMaterial())));
 		} else {
 			this.state = block.getState();
 
@@ -106,7 +110,7 @@ public class TempBlock {
 
 			put(block, this);
 
-			block.setBlockData(newData, applyPhysics(newData.getMaterial()));
+			ThreadUtil.ensureLocation(block.getLocation(), () -> block.setBlockData(finalNewData, applyPhysics(finalNewData.getMaterial())));
 		}
 		
 		this.setRevertTime(revertTime);
@@ -221,6 +225,12 @@ public class TempBlock {
 	 * @param defaulttype The default material to revert to if it can't
 	 */
 	public static void revertBlock(final Block block, final Material defaulttype) {
+		if (ProjectKorra.isFolia() && !Bukkit.isOwnedByCurrentRegion(block.getLocation())) {
+			//If the block is not owned by the current region, we can't revert it here
+			//We need to ensure that the block is reverted on the correct thread
+			ThreadUtil.ensureLocation(block.getLocation(), () -> revertBlock(block, defaulttype));
+			return;
+		}
 		if (instances_.containsKey(block)) {
 			//We clone the list first, then remove before reverting. The tempblock list is cloned so we get no concurrent modification exceptions
 			List<TempBlock> tempBlocks = new ArrayList<>(instances_.get(block));
@@ -330,14 +340,26 @@ public class TempBlock {
 	 */
 	private void trueRevertBlock(boolean removeFromQueue) {
 		this.reverted = true;
-		if (instances_.containsKey(this.block)) {
-			PaperLib.getChunkAtAsync(this.block.getLocation()).thenAccept(result -> {
-				TempBlock last = instances_.get(this.block).getLast();
-				this.block.setBlockData(last.newData); //Set the block to the next in line TempBlock
-			});
-		} else { //Set to the original blockstate
-			PaperLib.getChunkAtAsync(this.block.getLocation()).thenAccept(result -> revertState());
+		if (ProjectKorra.isFolia()) {
+			if (instances_.containsKey(this.block)) {
+				ThreadUtil.ensureLocation(this.block.getLocation(), () -> {
+					TempBlock last = instances_.get(this.block).getLast();
+					this.block.setBlockData(last.newData); //Set the block to the next in line TempBlock
+				});
+			} else { //Set to the original blockstate
+				ThreadUtil.ensureLocation(this.block.getLocation(), this::revertState);
+			}
+		} else {
+			if (instances_.containsKey(this.block)) {
+				PaperLib.getChunkAtAsync(this.block.getLocation()).thenAccept(result -> {
+					TempBlock last = instances_.get(this.block).getLast();
+					this.block.setBlockData(last.newData); //Set the block to the next in line TempBlock
+				});
+			} else { //Set to the original blockstate
+				PaperLib.getChunkAtAsync(this.block.getLocation()).thenAccept(result -> revertState());
+			}
 		}
+
 
 		if (removeFromQueue) { //Remove from the queue if it's in there. We only do this when required because it is an intensive action due to the collection type
 			REVERT_QUEUE.remove(this);
@@ -441,7 +463,8 @@ public class TempBlock {
 		if (isReverted())
 			return;
 		this.newData = data;
-		this.block.setBlockData(data, applyPhysics(data.getMaterial()));
+		ThreadUtil.ensureLocation(this.block.getLocation(), () ->
+			this.block.setBlockData(data, applyPhysics(data.getMaterial())));
 	}
 
 	/**
@@ -479,9 +502,11 @@ public class TempBlock {
 	 */
 	public void updateSnowableBlock(Block b, boolean snowy){
 		if (b.getBlockData() instanceof Snowable){
-			final Snowable snowable = (Snowable) b.getBlockData();
-			snowable.setSnowy(snowy);
-			b.setBlockData(snowable);
+			ThreadUtil.ensureLocation(b.getLocation(), () -> {
+				final Snowable snowable = (Snowable) b.getBlockData();
+				snowable.setSnowy(snowy);
+				b.setBlockData(snowable);
+			});
 		}
 	}
 

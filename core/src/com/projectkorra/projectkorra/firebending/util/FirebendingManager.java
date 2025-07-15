@@ -12,6 +12,6 @@ public class FirebendingManager implements Runnable {
 
 	@Override
 	public void run() {
-		FireDamageTimer.handleFlames();
+
 	}
 }

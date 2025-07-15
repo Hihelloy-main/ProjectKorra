@@ -5,14 +5,19 @@ import io.papermc.paper.threadedregions.scheduler.RegionScheduler;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Level;
 
 /**
  * Utility class for ensuring that a task is run on the correct thread.
  * Ensures compatibility between Folia and non-Folia servers. */
 public class ThreadUtil {
+
+    private static AtomicBoolean SHUTTING_DOWN = new AtomicBoolean(false);
 
     /**
      * Runs a task on the same thread as an entity. On Spigot, this is the main
@@ -21,16 +26,18 @@ public class ThreadUtil {
      * @param entity The entity to run the task on.
      * @param runnable The task to run.
      */
-    public static void ensureEntity(Entity entity, Runnable runnable) {
+    public static void ensureEntity(@NotNull Entity entity, @NotNull Runnable runnable) {
+        if (entity instanceof Player && !((Player)entity).isOnline()) return;
+
         if (ProjectKorra.isFolia()) {
-            if (Bukkit.isOwnedByCurrentRegion(entity) || Bukkit.isStopping()) {
-                runnable.run();
+            if (Bukkit.isOwnedByCurrentRegion(entity) || Bukkit.isStopping() || SHUTTING_DOWN.get()) {
+                runCatch(runnable, "Error in ensureEntity task on shutdown");
                 return;
             }
             entity.getScheduler().execute(ProjectKorra.plugin, runnable, null, 1L);
         } else {
             if (Bukkit.isPrimaryThread()) {
-                runnable.run();
+                runCatch(runnable, "Error in ensureEntity task");
                 return;
             }
             Bukkit.getScheduler().runTask(ProjectKorra.plugin, runnable);
@@ -47,7 +54,8 @@ public class ThreadUtil {
      * {@link io.papermc.paper.threadedregions.scheduler.ScheduledTask} on Folia and a
      * {@link org.bukkit.scheduler.BukkitTask} on Spigot.
      */
-    public static @NotNull Object ensureEntityLater(Entity entity, Runnable runnable, long delay) {
+    public static Object ensureEntityLater(@NotNull Entity entity, @NotNull Runnable runnable, long delay) {
+        if (entity instanceof Player && !((Player)entity).isOnline()) return null;
         delay = Math.max(1, delay);
         if (ProjectKorra.isFolia()) {
             return entity.getScheduler().execute(ProjectKorra.plugin, runnable, null, delay);
@@ -67,10 +75,16 @@ public class ThreadUtil {
      * {@link io.papermc.paper.threadedregions.scheduler.ScheduledTask} on Folia and a
      * {@link org.bukkit.scheduler.BukkitTask} on Spigot.
      */
-    public static @NotNull Object ensureEntityTimer(Entity entity, Runnable runnable, long delay, long repeat) {
+    public static Object ensureEntityTimer(@NotNull Entity entity, @NotNull Runnable runnable, long delay, long repeat) {
+        if (entity instanceof Player && !((Player)entity).isOnline()) return null;
         delay = Math.max(1, delay);
+        repeat = Math.max(1, repeat);
         if (ProjectKorra.isFolia()) {
-            return entity.getScheduler().runAtFixedRate(ProjectKorra.plugin, (task) -> runnable.run(), null, delay, repeat);
+            return entity.getScheduler().runAtFixedRate(ProjectKorra.plugin, (task) -> {
+                if (!runCatch(runnable, "Error in ensureEntityTimer task")) {
+                    task.cancel();
+                }
+            }, null, delay, repeat);
         } else {
             return Bukkit.getScheduler().runTaskTimer(ProjectKorra.plugin, runnable, delay, repeat);
         }
@@ -82,17 +96,17 @@ public class ThreadUtil {
      * @param location The location to run the task on.
      * @param runnable The task to run.
      */
-    public static void ensureLocation(Location location, Runnable runnable) {
+    public static void ensureLocation(@NotNull Location location, @NotNull Runnable runnable) {
         if (ProjectKorra.isFolia()) {
-            if (Bukkit.isOwnedByCurrentRegion(location) || Bukkit.isStopping()) {
-                runnable.run();
+            if (Bukkit.isOwnedByCurrentRegion(location) || Bukkit.isStopping() || SHUTTING_DOWN.get()) {
+                runCatch(runnable, "Error in ensureLocation task on shutdown");
                 return;
             }
             RegionScheduler scheduler = Bukkit.getRegionScheduler();
             scheduler.execute(ProjectKorra.plugin, location, runnable);
         } else {
             if (Bukkit.isPrimaryThread()) {
-                runnable.run();
+                runCatch(runnable, "Error in ensureLocation task on shutdown");
                 return;
             }
             Bukkit.getScheduler().runTask(ProjectKorra.plugin, runnable);
@@ -109,11 +123,15 @@ public class ThreadUtil {
      * {@link io.papermc.paper.threadedregions.scheduler.ScheduledTask} on Folia and a
      * {@link org.bukkit.scheduler.BukkitTask} on Spigot.
      */
-    public static @NotNull Object ensureLocationLater(@NotNull Location location, Runnable runnable, long delay) {
+    public static @NotNull Object ensureLocationLater(@NotNull Location location, @NotNull Runnable runnable, long delay) {
         delay = Math.max(1, delay);
         if (ProjectKorra.isFolia()) {
             RegionScheduler scheduler = Bukkit.getRegionScheduler();
-            return scheduler.runDelayed(ProjectKorra.plugin, location, (task) -> runnable.run(), delay);
+            return scheduler.runDelayed(ProjectKorra.plugin, location, (task) -> {
+                if (!runCatch(runnable, "Error in ensureLocationLater")) {
+                    task.cancel();
+                }
+            }, delay);
         } else {
             return Bukkit.getScheduler().runTaskLater(ProjectKorra.plugin, runnable, delay);
         }
@@ -130,13 +148,17 @@ public class ThreadUtil {
      * {@link io.papermc.paper.threadedregions.scheduler.ScheduledTask} on Folia and a
      * {@link org.bukkit.scheduler.BukkitTask} on Spigot.
      */
-    public static @NotNull Object ensureLocationTimer(Location location, Runnable runnable, long delay, long repeat) {
+    public static @NotNull Object ensureLocationTimer(@NotNull Location location, @NotNull Runnable runnable, long delay, long repeat) {
         delay = Math.max(1, delay);
+        repeat = Math.max(1, repeat);
         if (ProjectKorra.isFolia()) {
             RegionScheduler scheduler = Bukkit.getRegionScheduler();
-            return scheduler.runAtFixedRate(ProjectKorra.plugin, location, (task) -> runnable.run(), delay, repeat);
+            return scheduler.runAtFixedRate(ProjectKorra.plugin, location, (task) -> {
+                if (!runCatch(runnable, "Error in ensureLocationTimer task"))
+                    task.cancel();
+                }, delay, repeat);
         } else {
-            return Bukkit.getScheduler().runTaskLater(ProjectKorra.plugin, runnable, delay);
+            return Bukkit.getScheduler().runTaskTimer(ProjectKorra.plugin, runnable, delay, repeat);
         }
     }
 
@@ -144,13 +166,17 @@ public class ThreadUtil {
      * Runs a task asynchronously.
      * @param runnable The task to run.
      */
-    public static void runAsync(Runnable runnable) {
+    public static void runAsync(@NotNull Runnable runnable) {
         if (ProjectKorra.isFolia()) {
-            if (Bukkit.isStopping()) {
-                runnable.run();
+            if (Bukkit.isStopping() || SHUTTING_DOWN.get()) {
+                runCatch(runnable, "Error in runAsync task on shutdown");
                 return;
             }
-            Bukkit.getAsyncScheduler().runNow(ProjectKorra.plugin, (task) -> runnable.run());
+            Bukkit.getAsyncScheduler().runNow(ProjectKorra.plugin, (task) -> {
+                if (!runCatch(runnable, "Error in runAsync task")) {
+                    task.cancel();
+                }
+            });
         } else {
             Bukkit.getScheduler().runTaskAsynchronously(ProjectKorra.plugin, runnable);
         }
@@ -164,10 +190,14 @@ public class ThreadUtil {
      * {@link io.papermc.paper.threadedregions.scheduler.ScheduledTask} on Folia and a
      * {@link org.bukkit.scheduler.BukkitTask} on Spigot.
      */
-    public static @NotNull Object runAsyncLater(Runnable runnable, long delay) {
+    public static @NotNull Object runAsyncLater(@NotNull Runnable runnable, long delay) {
         delay = Math.max(1, delay);
         if (ProjectKorra.isFolia()) {
-            return Bukkit.getAsyncScheduler().runDelayed(ProjectKorra.plugin, (task) -> runnable.run(), delay * 50, TimeUnit.MILLISECONDS);
+            return Bukkit.getAsyncScheduler().runDelayed(ProjectKorra.plugin, (task) -> {
+                if (!runCatch(runnable, "Error in runAsyncLater task")) {
+                    task.cancel();
+                }
+            }, delay * 50, TimeUnit.MILLISECONDS);
         } else {
             return Bukkit.getScheduler().runTaskLater(ProjectKorra.plugin, runnable, delay);
         }
@@ -182,7 +212,7 @@ public class ThreadUtil {
      * {@link io.papermc.paper.threadedregions.scheduler.ScheduledTask} on Folia and a
      * {@link org.bukkit.scheduler.BukkitTask} on Spigot.
      */
-    public static @NotNull Object runAsyncTimer(Runnable runnable, long delay, long repeat) {
+    public static @NotNull Object runAsyncTimer(@NotNull Runnable runnable, long delay, long repeat) {
         delay = Math.max(1, delay);
         if (ProjectKorra.isFolia()) {
             return Bukkit.getAsyncScheduler().runAtFixedRate(ProjectKorra.plugin, (task) -> runnable.run(), delay * 50, repeat * 50, TimeUnit.MILLISECONDS);
@@ -202,13 +232,17 @@ public class ThreadUtil {
      *
      * @param runnable The task to run.
      */
-    public static void runGlobal(Runnable runnable) {
+    public static void runGlobal(@NotNull Runnable runnable) {
         if (ProjectKorra.isFolia()) {
-            if (Bukkit.isStopping()) {
-                runnable.run();
+            if (Bukkit.isStopping() || SHUTTING_DOWN.get()) {
+                runCatch(runnable, "Error in runGlobal task on shutdown");
                 return;
             }
-            Bukkit.getGlobalRegionScheduler().run(ProjectKorra.plugin, (task) -> runnable.run());
+            Bukkit.getGlobalRegionScheduler().run(ProjectKorra.plugin, (task) -> {
+                if (!runCatch(runnable, "Error in runGlobal task")) {
+                    task.cancel();
+                }
+            });
         } else {
             Bukkit.getScheduler().runTask(ProjectKorra.plugin, runnable);
         }
@@ -229,10 +263,14 @@ public class ThreadUtil {
      * {@link io.papermc.paper.threadedregions.scheduler.ScheduledTask} on Folia and a
      * {@link org.bukkit.scheduler.BukkitTask} on Spigot.
      */
-    public static @NotNull Object runGlobalLater(Runnable runnable, long delay) {
+    public static @NotNull Object runGlobalLater(@NotNull Runnable runnable, long delay) {
         delay = Math.max(1, delay);
         if (ProjectKorra.isFolia()) {
-            return Bukkit.getGlobalRegionScheduler().runDelayed(ProjectKorra.plugin, (task) -> runnable.run(), delay);
+            return Bukkit.getGlobalRegionScheduler().runDelayed(ProjectKorra.plugin, (task) -> {
+                if (!runCatch(runnable, "Error in runGlobalLater task")) {
+                    task.cancel();
+                }
+            }, delay);
         } else {
             return  Bukkit.getScheduler().runTaskLater(ProjectKorra.plugin, runnable, delay);
         }
@@ -255,10 +293,14 @@ public class ThreadUtil {
      * {@link io.papermc.paper.threadedregions.scheduler.ScheduledTask} on Folia and a
      * {@link org.bukkit.scheduler.BukkitTask} on Spigot.
      */
-    public static @NotNull Object runGlobalTimer(Runnable runnable, long delay, long repeat) {
+    public static @NotNull Object runGlobalTimer(@NotNull Runnable runnable, long delay, long repeat) {
         delay = Math.max(1, delay);
         if (ProjectKorra.isFolia()) {
-            return Bukkit.getGlobalRegionScheduler().runAtFixedRate(ProjectKorra.plugin, (task) -> runnable.run(), delay, repeat);
+            return Bukkit.getGlobalRegionScheduler().runAtFixedRate(ProjectKorra.plugin, (task) -> {
+                if (!runCatch(runnable, "Error in runGlobalTimer task")) {
+                    task.cancel();
+                }
+            }, delay, repeat);
         } else {
             return Bukkit.getScheduler().runTaskTimer(ProjectKorra.plugin, runnable, delay, repeat);
         }
@@ -271,7 +313,8 @@ public class ThreadUtil {
      *             {@link #ensureEntityTimer(Entity, Runnable, long, long)}.
      * @return True if the task was cancelled successfully, false otherwise.
      */
-    public static boolean cancelTask(@NotNull Object task) {
+    public static boolean cancelTask(Object task) {
+        if (task == null) return false;
         if (ProjectKorra.isFolia()) {
             if (task instanceof io.papermc.paper.threadedregions.scheduler.ScheduledTask) {
                 ((io.papermc.paper.threadedregions.scheduler.ScheduledTask) task).cancel();
@@ -290,7 +333,8 @@ public class ThreadUtil {
      * Checks if a task is cancelled.
      * @return True if the task is cancelled, false otherwise.
      */
-    public static boolean isTaskCancelled(@NotNull Object task) {
+    public static boolean isTaskCancelled(Object task) {
+        if (task == null) return true;
         if (ProjectKorra.isFolia()) {
             if (task instanceof io.papermc.paper.threadedregions.scheduler.ScheduledTask) {
                 return ((io.papermc.paper.threadedregions.scheduler.ScheduledTask) task).isCancelled();
@@ -301,5 +345,19 @@ public class ThreadUtil {
             }
         }
         return false;
+    }
+
+    private static boolean runCatch(Runnable runnable, String error) {
+        try {
+            runnable.run();
+            return true;
+        } catch (Exception e) {
+            ProjectKorra.log.log(Level.WARNING, error, e);
+            return false;
+        }
+    }
+
+    public static void shutdown() {
+        SHUTTING_DOWN.set(true);
     }
 }

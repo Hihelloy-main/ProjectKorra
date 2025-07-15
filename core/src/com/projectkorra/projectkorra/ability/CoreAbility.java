@@ -17,6 +17,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.jar.JarFile;
+import java.util.logging.Level;
 
 import com.projectkorra.projectkorra.ability.util.FoliaCollisionManager;
 import com.projectkorra.projectkorra.attribute.*;
@@ -166,17 +167,12 @@ public abstract class CoreAbility implements Ability {
 	 * @see #isRemoved()
 	 */
 	public void start() {
-		if (this.player == null || !this.isEnabled()) {
+		if (this.player == null || !this.isEnabled() || this.bPlayer == null) {
 			return;
 		}
 
 		if (ProjectKorra.isFolia() && !Bukkit.isOwnedByCurrentRegion(this.player)) {
-			ProjectKorra.log.warning("Tried to start ability " + this.getName() + " (" + this.getClass().getSimpleName() +
-					".class) on a player that is not owned by the current region. This is not allowed in Folia. Please report " +
-					"this to the ProjectKorra team.");
-			for (int i = 0; i < 6 && i < Thread.currentThread().getStackTrace().length; i++) {
-				ProjectKorra.log.warning(Thread.currentThread().getStackTrace()[i].toString());
-			}
+			ThreadUtil.ensureLocation(this.player.getLocation(), this::start);
 			return;
 		}
 
@@ -216,6 +212,11 @@ public abstract class CoreAbility implements Ability {
 			//ProjectKorra.log.info("[Debug] " + this.getName() + " was started on Thread " + Thread.currentThread().getName() + " (#" + Thread.currentThread().getId() + ")");
 
 			this._foliaTask = Bukkit.getRegionScheduler().runAtFixedRate(ProjectKorra.plugin, player.getLocation(), (task) -> {
+				if (this.player == null || !this.player.isOnline()) {
+					this.remove();
+					task.cancel();
+					return;
+				}
 				this._foliaCurrentTick++;
 				this.progressSelf();
 			}, 1L, 1L);
@@ -334,6 +335,7 @@ public abstract class CoreAbility implements Ability {
 			e.printStackTrace();
 			try {
 				this.getPlayer().sendMessage(ChatColor.YELLOW + "[" + new SimpleDateFormat("dd-MM-yyyy HH:mm:ss").format(new Date()) + "] " + ChatColor.RED + "There was an error running " + this.getName() + ". please notify the server owner describing exactly what you were doing at this moment");
+				this.getPlayer().sendMessage(ChatColor.RED + e.getMessage());
 			} catch (final Exception me) {
 				ProjectKorra.log.severe("Unable to notify ability user of error");
 			}
@@ -1072,7 +1074,7 @@ public abstract class CoreAbility implements Ability {
 					cache.getInitialValues().put(this, cache.getField().get(this));
 				}
 			} catch (IllegalAccessException e) {
-				e.printStackTrace();
+				ProjectKorra.log.log(Level.SEVERE, "Failed to cache attributes in ability " + getClass().getSimpleName(), e);
 			}
 			attributeValuesCached = true;
 		}
@@ -1185,13 +1187,6 @@ public abstract class CoreAbility implements Ability {
 
 	@Override
 	public String toString() {
-		return "CoreAbility{" +
-				"player=" + player +
-				", name=" + getName() +
-				", class=" + getClass().getSimpleName() +
-				", id=" + id +
-				", started=" + started +
-				", removed=" + removed +
-				'}';
+		return this.getClass().getSimpleName() + "#" + this.getId() + "(" + this.player.getName() + ")";
 	}
 }

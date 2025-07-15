@@ -1,5 +1,6 @@
 package com.projectkorra.projectkorra.region;
 
+import com.projectkorra.projectkorra.ProjectKorra;
 import com.projectkorra.projectkorra.ability.CoreAbility;
 import com.projectkorra.projectkorra.hooks.RegionProtectionHook;
 import com.projectkorra.projectkorra.util.BlockCacheElement;
@@ -154,6 +155,14 @@ public class RegionProtection {
     }
 
     private static boolean checkAll(Player player, Location location, CoreAbility ability) {
+        if (ProjectKorra.isFolia() && !Bukkit.isOwnedByCurrentRegion(location)) {
+            //Attempt to try check it on the correct thread. If it doesn't return on time, oh well, we would have returned false anyway
+            boolean[] result = {false};
+            ThreadUtil.ensureLocation(location, () -> {
+                result[0] = checkAll(player, location, ability);
+            });
+            return result[0];
+        }
         for (RegionProtectionHook protection : RegionProtection.getActiveProtections().values()) {
             try {
                 if (protection.isRegionProtected(player, location, ability)) {

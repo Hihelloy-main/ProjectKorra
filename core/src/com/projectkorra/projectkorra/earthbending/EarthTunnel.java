@@ -3,6 +3,7 @@ package com.projectkorra.projectkorra.earthbending;
 import java.util.HashSet;
 import java.util.Set;
 
+import com.projectkorra.projectkorra.util.ThreadUtil;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
@@ -132,7 +133,7 @@ public class EarthTunnel extends EarthAbility {
 
 					if (this.revert) {
 						if (getMovedEarth().containsKey(this.block)) {
-							this.block.setType(Material.AIR);
+							ThreadUtil.ensureLocation(block.getLocation(), () -> block.setType(Material.AIR));
 						} else {
 							new TempBlock(this.block, Material.AIR).setRevertTime(revertTime);
 							if (isPlant(this.block.getRelative(BlockFace.UP)) || isSnow(this.block.getRelative(BlockFace.UP))) {
@@ -150,7 +151,7 @@ public class EarthTunnel extends EarthAbility {
 						if (this.dropLootIfNotRevert) {
 							this.block.breakNaturally();
 						} else {
-							this.block.setType(Material.AIR);
+							ThreadUtil.ensureLocation(block.getLocation(), () -> block.setType(Material.AIR));
 						}
 					}
 				}

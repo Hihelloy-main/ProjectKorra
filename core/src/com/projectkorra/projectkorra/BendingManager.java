@@ -71,6 +71,11 @@ public class BendingManager implements Runnable {
 			Bukkit.getGlobalRegionScheduler().runAtFixedRate(ProjectKorra.plugin, (task) -> handleDayNight(), 1, 5); //Every 5 ticks
 		} else {
 			Bukkit.getScheduler().runTaskTimerAsynchronously(ProjectKorra.plugin, tempElementsRunnable, 1, 2);
+			Bukkit.getScheduler().scheduleSyncRepeatingTask(ProjectKorra.plugin, new AirbendingManager(ProjectKorra.plugin), 0, 1);
+			Bukkit.getScheduler().scheduleSyncRepeatingTask(ProjectKorra.plugin, new WaterbendingManager(ProjectKorra.plugin), 0, 1);
+			Bukkit.getScheduler().scheduleSyncRepeatingTask(ProjectKorra.plugin, new EarthbendingManager(ProjectKorra.plugin), 0, 1);
+			Bukkit.getScheduler().scheduleSyncRepeatingTask(ProjectKorra.plugin, new FirebendingManager(ProjectKorra.plugin), 0, 1);
+			Bukkit.getScheduler().scheduleSyncRepeatingTask(ProjectKorra.plugin, new ChiblockingManager(ProjectKorra.plugin), 0, 1);
 		}
 	}
 

@@ -187,7 +187,7 @@ public class ChooseCommand extends PKCommand {
 						bPlayer.addElement(e);
 
 						if (online) {
-							for (final SubElement sub : Element.getSubElements(element)) {
+							for (final SubElement sub : Element.getSubElements(e)) {
 								if (((BendingPlayer) bPlayer).hasSubElementPermission(sub)) {
 									PlayerChangeSubElementEvent subEvent = new PlayerChangeSubElementEvent(sender, target, sub, PlayerChangeSubElementEvent.Result.CHOOSE);
 

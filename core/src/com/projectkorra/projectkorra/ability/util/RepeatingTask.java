@@ -4,18 +4,29 @@ import com.projectkorra.projectkorra.Element;
 import com.projectkorra.projectkorra.ability.CoreAbility;
 import com.projectkorra.projectkorra.ability.ElementalAbility;
 import org.bukkit.Location;
+import org.bukkit.entity.Player;
+import org.jetbrains.annotations.NotNull;
 
 public abstract class RepeatingTask extends ElementalAbility {
 
-    private final CoreAbility parentAbility;
+    private CoreAbility parentAbility;
 
-    public RepeatingTask(CoreAbility parentAbility) {
+    public RepeatingTask(@NotNull CoreAbility parentAbility) {
         super(parentAbility.getPlayer());
         this.parentAbility = parentAbility;
     }
 
+    public RepeatingTask(@NotNull Player player) {
+        super(player);
+        this.parentAbility = null;
+    }
+
     public CoreAbility getParentAbility() {
         return parentAbility;
+    }
+
+    public void setParentAbility(CoreAbility parentAbility) {
+        this.parentAbility = parentAbility;
     }
 
     @Override

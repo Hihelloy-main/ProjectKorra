@@ -49,6 +49,7 @@ import com.projectkorra.projectkorra.util.TempArmor;
 import com.projectkorra.projectkorra.util.TempArmorStand;
 import com.projectkorra.projectkorra.util.TempBlock;
 import com.projectkorra.projectkorra.util.TempFallingBlock;
+import com.projectkorra.projectkorra.util.ThreadUtil;
 import com.projectkorra.projectkorra.waterbending.WaterManipulation;
 import com.projectkorra.projectkorra.waterbending.WaterSpout;
 import com.projectkorra.projectkorra.waterbending.blood.Bloodbending;
@@ -1374,6 +1375,7 @@ public class GeneralMethods {
 		// WaterAbility.setupWaterTransformableBlocks();
 		EarthTunnel.clearBendableMaterials();
 
+		BendingManager manager = new BendingManager();
 
 		if (ProjectKorra.isFolia()) {
 			Bukkit.getGlobalRegionScheduler().cancelTasks(ProjectKorra.plugin);
@@ -1382,17 +1384,8 @@ public class GeneralMethods {
 			Bukkit.getScheduler().cancelTasks(ProjectKorra.plugin);
 
 			ProjectKorra.plugin.revertChecker = ProjectKorra.plugin.getServer().getScheduler().runTaskTimerAsynchronously(ProjectKorra.plugin, new RevertChecker(ProjectKorra.plugin), 0, 200);
+			ProjectKorra.plugin.getServer().getScheduler().scheduleSyncRepeatingTask(ProjectKorra.plugin, manager, 0, 1);
 		}
-
-		new BendingManager();
-
-		//FOLIA TODO
-		//ProjectKorra.plugin.getServer().getScheduler().scheduleSyncRepeatingTask(ProjectKorra.plugin, new BendingManager(), 0, 1);
-		//ProjectKorra.plugin.getServer().getScheduler().scheduleSyncRepeatingTask(ProjectKorra.plugin, new AirbendingManager(ProjectKorra.plugin), 0, 1);
-		//ProjectKorra.plugin.getServer().getScheduler().scheduleSyncRepeatingTask(ProjectKorra.plugin, new WaterbendingManager(ProjectKorra.plugin), 0, 1);
-		//ProjectKorra.plugin.getServer().getScheduler().scheduleSyncRepeatingTask(ProjectKorra.plugin, new EarthbendingManager(ProjectKorra.plugin), 0, 1);
-		//ProjectKorra.plugin.getServer().getScheduler().scheduleSyncRepeatingTask(ProjectKorra.plugin, new FirebendingManager(ProjectKorra.plugin), 0, 1);
-		//ProjectKorra.plugin.getServer().getScheduler().scheduleSyncRepeatingTask(ProjectKorra.plugin, new ChiblockingManager(ProjectKorra.plugin), 0, 1);
 
 		EarthTunnel.setupBendableMaterials();
 		Bloodbending.loadBloodlessFromConfig();
@@ -1520,7 +1513,8 @@ public class GeneralMethods {
 		f.add("");
 		f.add("Date Created: " + getCurrentDate());
 		f.add("Java Version: " + System.getProperty("java.version"));
-		f.add("Bukkit Version: " + Bukkit.getServer().getVersion());
+		f.add("Server Software: " + Bukkit.getName());
+		f.add("Bukkit Version: " + Bukkit.getServer().getVersion() + " (" + Bukkit.getBukkitVersion() + ")");
 		f.add("");
 		f.add("ProjectKorra (Core) Information");
 		f.add("====================");
@@ -1571,6 +1565,19 @@ public class GeneralMethods {
 				f.add("- " + plugin.getDescription().getName() + " v" + plugin.getDescription().getVersion());
 			}
 		}
+
+		f.add("");
+		f.add("Runtime Statistics");
+		f.add("====================");
+		f.add("Total Memory: " + (Runtime.getRuntime().totalMemory() / 1024 / 1024) + " MB");
+		f.add("Free Memory: " + (Runtime.getRuntime().freeMemory() / 1024 / 1024) + " MB");
+		f.add("Max Memory: " + (Runtime.getRuntime().maxMemory() / 1024 / 1024) + " MB");
+		f.add("Available Processors: " + Runtime.getRuntime().availableProcessors());
+		f.add("Online Players: " + Bukkit.getOnlinePlayers().size() + "/" + Bukkit.getMaxPlayers());
+		f.add("Worlds Loaded: " + Bukkit.getWorlds().size());
+		f.add("Listeners Registered" + HandlerList.getRegisteredListeners(ProjectKorra.plugin).size());
+		f.add("BendingPlayers Loaded: " + BendingPlayer.getPlayers().size());
+		f.add("OfflineBendingPlayers Loaded: " + OfflineBendingPlayer.PLAYERS.size());
 
 		f.add("");
 		f.add("Ability Information");
@@ -1800,17 +1807,18 @@ public class GeneralMethods {
 	}
 
 	public static void stopBending() {
-		CoreAbility.removeAll(); //Now Folia safe
-		EarthAbility.stopBending(); //Should be okay?
-		WaterAbility.stopBending(); //Should be fine now
-		FireAbility.stopBending(); //Does nothing lmao
+		ThreadUtil.shutdown();
+		CoreAbility.removeAll();
+		EarthAbility.stopBending();
+		WaterAbility.stopBending();
+		FireAbility.stopBending();
 
-		TempBlock.removeAll(); //Now Folia safe
-		TempArmor.revertAll(); //Now folia safe
-		TempArmorStand.removeAll(); //Now folia safe
-		MovementHandler.resetAll(); //Now folia safe
-		MultiAbilityManager.removeAll(); //Doesn't need thread safety
-		TempFallingBlock.removeAllFallingBlocks(); //Folia safe
+		TempBlock.removeAll();
+		TempArmor.revertAll();
+		TempArmorStand.removeAll();
+		MovementHandler.resetAll();
+		MultiAbilityManager.removeAll();
+		TempFallingBlock.removeAllFallingBlocks();
 	}
 
 	public static void stopPlugin() {
@@ -1821,6 +1829,7 @@ public class GeneralMethods {
 		return loc1.getWorld().equals(loc2.getWorld()) && loc1.getX() == loc2.getX() && loc1.getY() == loc2.getY() && loc1.getZ() == loc2.getZ();
 	}
 
+	@Deprecated
 	public static boolean isLightEmitting(final Material material) {
 		switch (material.name()) {
 			case "GLOWSTONE":
@@ -1858,6 +1867,10 @@ public class GeneralMethods {
 			default:
 				return false;
 		}
+	}
+
+	public static boolean isLightEmitting(final Block block) {
+		return block.getBlockData().getLightEmission() > 0;
 	}
 
 	@Deprecated
