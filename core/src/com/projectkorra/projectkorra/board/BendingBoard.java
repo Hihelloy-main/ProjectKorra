@@ -1,275 +1,227 @@
 package com.projectkorra.projectkorra.board;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedList;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Queue;
 
-import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
-import org.bukkit.scoreboard.DisplaySlot;
-import org.bukkit.scoreboard.Objective;
-import org.bukkit.scoreboard.Scoreboard;
-import org.bukkit.scoreboard.Team;
+import org.bukkit.scheduler.BukkitTask;
 
 import com.projectkorra.projectkorra.BendingPlayer;
 import com.projectkorra.projectkorra.Element;
 import com.projectkorra.projectkorra.ProjectKorra;
+import com.projectkorra.projectkorra.ability.ComboAbility;
 import com.projectkorra.projectkorra.ability.CoreAbility;
 import com.projectkorra.projectkorra.configuration.ConfigManager;
 
+import fr.mrmicky.fastboard.FastBoard;
 import net.md_5.bungee.api.ChatColor;
-import org.jetbrains.annotations.NotNull;
 
 /**
- * Represents a player's scoreboard for bending purposes
+ * The main BendingBoard class, now working on Folia with the FastBoard library
  */
 public class BendingBoard {
 
-	protected static final char[] CHAT_CHARS = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
-	
-	public static class BoardSlot {
-		
-		protected Scoreboard board;
-		protected Objective obj;
-		public int slot;
-		protected Team team;
-		protected String entry;
-		public Optional<BoardSlot> next = Optional.empty(), prev = Optional.empty();
+    private final Player player;
+    private final BendingPlayer bendingPlayer;
+    private final FastBoard board;
 
-		public BoardSlot(Scoreboard board, Objective obj, int slot) {
-			this.board = board;
-			this.obj = obj;
-			this.slot = slot + 1;
-			this.formTeam();
-		}
+    private int selectedSlot;
+    private String prefix;
+    private String emptySlot;
+    private String miscSeparator;
+    private ChatColor selectedColor;
+    private ChatColor altColor;
 
-		public void formTeam() {
-			this.team = board.getTeam("slot" + this.slot) == null
-					? board.registerNewTeam("slot" + this.slot)
-					: board.getTeam("slot" + this.slot);
-			this.entry = "\u00A7" + CHAT_CHARS[slot % 10] + "" + "\u00A7" + CHAT_CHARS[slot % 16];
-			
-			team.addEntry(entry);
-		}
+    private final Map<String, CooldownEntry> miscCooldowns = new LinkedHashMap<>();
+    private BukkitTask updateTask;
 
-		public void set() {
-			int s = Math.min(slot, 11);
-			obj.getScore(entry).setScore(-s);
-		}
-		
-		public void update(@NotNull String prefix, @NotNull String name) {
-			team.setPrefix(prefix);
-			team.setSuffix(name);
-			set();
-		}
-		
-		public void setSlot(int slot) {
-			this.slot = slot + 1;
-			set();
-		}
+    public BendingBoard(final BendingPlayer bPlayer) {
+        this.bendingPlayer = bPlayer;
+        this.player = bPlayer.getPlayer();
 
-		public void clear(boolean formNewTeam) {
-			//Make sure the team hasn't already been unregistered
-			if (team.getScoreboard() != null && team.getScoreboard().getTeam("slot" + this.slot) != null) {
-				String prefix = team.getPrefix(), suffix = team.getSuffix();
-				team.unregister();
-				if (formNewTeam) {
-					formTeam();
-					update(prefix, suffix);
-				}
-			}
-			board.resetScores(entry);
-		}
+        if (this.player == null) {
+            throw new IllegalArgumentException("Player cannot be null");
+        }
 
-		public void setNext(BoardSlot slot) {
-			this.next = Optional.of(slot);
-		}
+        this.selectedSlot = this.player.getInventory().getHeldItemSlot() + 1;
 
-		public void setPrev(BoardSlot slot) {
-			this.prev = Optional.of(slot);
-		}
-	}
+        String title = ChatColor.translateAlternateColorCodes('&',
+                ConfigManager.languageConfig.get().getString("Board.Title"));
+        this.board = new FastBoard(this.player);
+        this.board.updateTitle(title);
 
-	protected final BoardSlot[] slots = new BoardSlot[9];
-	protected final Map<String, BoardSlot> misc = new HashMap<>();
-	protected final Queue<Integer> miscSlotIds = new LinkedList<>();
-	protected BoardSlot miscTail = null;
+        this.prefix = ChatColor.stripColor(ConfigManager.languageConfig.get().getString("Board.Prefix.Text"));
+        this.emptySlot = ChatColor.translateAlternateColorCodes('&',
+                ConfigManager.languageConfig.get().getString("Board.EmptySlot"));
+        this.miscSeparator = ChatColor.translateAlternateColorCodes('&',
+                ConfigManager.languageConfig.get().getString("Board.MiscSeparator"));
 
-	protected final Player player;
-	protected final BendingPlayer bendingPlayer;
+        updateAll();
+    }
 
-	protected final Scoreboard bendingBoard;
-	protected final Objective bendingSlots;
-	protected int selectedSlot;
+    public void destroy() {
+        if (this.updateTask != null) {
+            this.updateTask.cancel();
+        }
 
-	protected String prefix, emptySlot, miscSeparator;
-	protected ChatColor selectedColor, altColor;
+        if (this.board != null && !this.board.isDeleted()) {
+            this.board.delete();
+        }
 
-	public BendingBoard(final BendingPlayer bPlayer) {
-		bendingPlayer = bPlayer;
-		player = bPlayer.getPlayer();
-		selectedSlot = player.getInventory().getHeldItemSlot() + 1;
+        this.miscCooldowns.clear();
+    }
 
-		bendingBoard = Bukkit.getScoreboardManager().getNewScoreboard();
-		
-		String title = ChatColor.translateAlternateColorCodes('&', ConfigManager.languageConfig.get().getString("Board.Title"));
-		bendingSlots = bendingBoard.registerNewObjective("Board Slots", "dummy", title);
-		bendingSlots.setDisplaySlot(DisplaySlot.SIDEBAR);
-		
-		for (int i = 0; i < 9; ++i) {
-			slots[i] = new BoardSlot(bendingBoard, bendingSlots, i);
-		}
-		
-		prefix = ChatColor.stripColor(ConfigManager.languageConfig.get().getString("Board.Prefix.Text"));
-		emptySlot = ChatColor.translateAlternateColorCodes('&', ConfigManager.languageConfig.get().getString("Board.EmptySlot"));
-		miscSeparator = ChatColor.translateAlternateColorCodes('&', ConfigManager.languageConfig.get().getString("Board.MiscSeparator"));
+    private ChatColor getElementColor() {
+        if (this.bendingPlayer.getElements().size() > 1) {
+            return Element.AVATAR.getColor();
+        } else if (this.bendingPlayer.getElements().size() == 1) {
+            return this.bendingPlayer.getElements().get(0).getColor();
+        } else {
+            return ChatColor.WHITE;
+        }
+    }
 
-		for (int i = 0; i < 9; i++) {
-			miscSlotIds.add(i);
-		}
+    private ChatColor getColor(String from, ChatColor def) {
+        if (from == null || from.isEmpty()) {
+            return def;
+        }
 
-		updateAll();
-	}
+        if (from.equalsIgnoreCase("element")) {
+            return getElementColor();
+        }
 
-	void destroy() {
-		bendingBoard.clearSlot(DisplaySlot.SIDEBAR);
-		bendingSlots.unregister();
-	}
-	
-	private ChatColor getElementColor() {
-		if (bendingPlayer.getElements().size() > 1) {
-			return Element.AVATAR.getColor();
-		} else if (bendingPlayer.getElements().size() == 1) {
-			return bendingPlayer.getElements().get(0).getColor();
-		} else {
-			return ChatColor.WHITE;
-		}
-	}
-	
-	private ChatColor getColor(String from, ChatColor def) {
-		if (from.equalsIgnoreCase("element")) {
-			return getElementColor();
-		}
-		
-		try {
-			return ChatColor.of(from);
-		} catch (Exception e) {
-			ProjectKorra.plugin.getLogger().warning("Couldn't parse board color from '" + from + "', using default!");
-			return def;
-		}
-	}
+        try {
+            return ChatColor.of(from);
+        } catch (Exception e) {
+            ProjectKorra.plugin.getLogger().warning("Couldn't parse board color from '" + from + "', using default!");
+            return def;
+        }
+    }
 
-	public void hide() {
-		player.setScoreboard(Bukkit.getScoreboardManager().getMainScoreboard());
-	}
+    public void hide() {
+        if (this.board != null && !this.board.isDeleted()) {
+            this.board.updateLines(new ArrayList<String>());
+        }
+    }
 
-	public void show() {
-		player.setScoreboard(bendingBoard);
-		updateAll();
-	}
+    public void show() {
+        updateAll();
+    }
 
-	public boolean isVisible() {
-		return player.getScoreboard().equals(bendingBoard);
-	}
+    public boolean isVisible() {
+        return this.board != null && !this.board.isDeleted();
+    }
 
-	public void setVisible(boolean show) {
-		if (show) {
-			show();
-		} else {
-			hide();
-		}
-	}
+    public void setVisible(boolean show) {
+        if (show) {
+            show();
+        } else {
+            hide();
+        }
+    }
 
-	public void setSlot(int slot, String ability, boolean cooldown) {
-		if (slot < 1 || slot > 9 || !player.getScoreboard().equals(bendingBoard)) {
-			return;
-		}
-		
-		StringBuilder sb = new StringBuilder();
-		
-		if (ability == null || ability.isEmpty()) {
-			sb.append(emptySlot.replaceAll("\\{slot_number\\}", "" + slot));
-		} else {
-			CoreAbility coreAbility = CoreAbility.getAbility(ChatColor.stripColor(ability));
-			if (coreAbility == null) { // MultiAbility
-				if (cooldown || bendingPlayer.isOnCooldown(ability)) {
-					sb.append(ChatColor.STRIKETHROUGH);
-				}
-				
-				sb.append(ability);
-			} else {
-				sb.append(coreAbility.getMovePreviewWithoutCooldownTimer(player, cooldown));
-			}
-		}
-		
-		slots[slot - 1].update((slot == selectedSlot ? selectedColor : altColor) + prefix, sb.toString());
-	}
-	
-	private int updateSelected(int newSlot) {
-		int oldSlot = selectedSlot;
-		selectedSlot = newSlot;
-		return oldSlot;
-	}
-	
-	public void updateColors() {
-		selectedColor = getColor(ConfigManager.languageConfig.get().getString("Board.Prefix.SelectedColor"), ChatColor.WHITE);
-		altColor = getColor(ConfigManager.languageConfig.get().getString("Board.Prefix.NonSelectedColor"), ChatColor.DARK_GRAY);
-	}
+    public void setSlot(int slot, String ability, boolean cooldown) {
+        if (slot < 1 || slot > 9 || this.board == null || this.board.isDeleted()) {
+            return;
+        }
 
-	public void updateAll() {
-		updateColors();
-		selectedSlot = player.getInventory().getHeldItemSlot() + 1;
-		for (int i = 1; i <= 9; i++) {
-			setSlot(i, bendingPlayer.getAbilities().get(i), false);
-		}
-	}
+        updateBoard();
+    }
 
-	public void clearSlot(int slot) {
-		setSlot(slot, null, false);
-	}
+    public void clearSlot(int slot) {
+        setSlot(slot, null, false);
+    }
 
-	public void setActiveSlot(int newSlot) {
-		int oldSlot = updateSelected(newSlot);
-		setSlot(oldSlot, bendingPlayer.getAbilities().get(oldSlot), false);
-		setSlot(newSlot, bendingPlayer.getAbilities().get(newSlot), false);
-	}
+    public void setActiveSlot(int newSlot) {
+        if (newSlot < 1 || newSlot > 9) {
+            return;
+        }
 
-	public void setAbilityCooldown(String name, boolean cooldown) {
-		bendingPlayer.getAbilities().entrySet().stream().filter(entry -> name.equals(entry.getValue())).forEach(entry -> setSlot(entry.getKey(), name, cooldown));
-	}
-	
-	public void updateMisc(String name, ChatColor color, boolean cooldown) {
-		if (!cooldown) {
-			misc.computeIfPresent(name, (key, slot) -> {
-				slot.next.ifPresent(n -> n.prev = slot.prev);
-				slot.prev.ifPresent(p -> p.next = slot.next);
-				if (slot == miscTail) {
-					miscTail = null;
-				}
-				
-				slot.clear(false);
-				miscSlotIds.add(slot.slot - 10);
-				return null;
-			});
-				
-			if (misc.isEmpty()) {
-				bendingBoard.resetScores(miscSeparator);
-			}
-		} else if (!misc.containsKey(name)) {
-			BoardSlot slot = new BoardSlot(bendingBoard, bendingSlots, 10 + miscSlotIds.poll());
-			slot.update(String.join("", Collections.nCopies(ChatColor.stripColor(prefix).length() + 1, " ")), color + "" + ChatColor.STRIKETHROUGH + name);
-			
-			if (miscTail != null) {
-				miscTail.setNext(slot);
-				slot.setPrev(miscTail);
-			}
-			
-			miscTail = slot;
-			misc.put(name, slot);
-			bendingSlots.getScore(miscSeparator).setScore(-10);
-		}	
-	}
+        this.selectedSlot = newSlot;
+        updateBoard();
+    }
+
+    public void setAbilityCooldown(String name, boolean cooldown) {
+        if (name == null || name.isEmpty()) {
+            return;
+        }
+
+        updateBoard();
+    }
+
+    public void updateMisc(String name, ChatColor color, boolean cooldown) {
+        if (name == null || name.isEmpty()) {
+            return;
+        }
+
+        if (cooldown) {
+            this.miscCooldowns.put(name, new CooldownEntry(color, name));
+        } else {
+            this.miscCooldowns.remove(name);
+        }
+
+        updateBoard();
+    }
+
+    public void updateColors() {
+        this.selectedColor = getColor(ConfigManager.languageConfig.get().getString("Board.Prefix.SelectedColor"), ChatColor.WHITE);
+        this.altColor = getColor(ConfigManager.languageConfig.get().getString("Board.Prefix.NonSelectedColor"), ChatColor.DARK_GRAY);
+    }
+
+    public void updateAll() {
+        updateColors();
+        this.selectedSlot = this.player.getInventory().getHeldItemSlot() + 1;
+        this.miscCooldowns.clear();
+        updateBoard();
+    }
+
+    private void updateBoard() {
+        if (this.board == null || this.board.isDeleted()) {
+            return;
+        }
+
+        List<String> lines = new ArrayList<>();
+
+        for (int i = 1; i <= 9; i++) {
+            String ability = this.bendingPlayer.getAbilities().get(i);
+            ChatColor slotColor = (i == this.selectedSlot) ? this.selectedColor : this.altColor;
+
+            if (ability == null || ability.isEmpty()) {
+                lines.add(slotColor + this.prefix + this.emptySlot.replaceAll("\\{slot_number\\}", String.valueOf(i)));
+            } else {
+                CoreAbility coreAbility = CoreAbility.getAbility(ChatColor.stripColor(ability));
+
+                if (coreAbility == null) {
+                    boolean isOnCooldown = this.bendingPlayer.isOnCooldown(ability);
+                    String display = isOnCooldown ? ChatColor.STRIKETHROUGH + ability : ability;
+                    lines.add(slotColor + this.prefix + display);
+                } else {
+                    String preview = coreAbility.getMovePreviewWithoutCooldownTimer(this.player, false);
+                    lines.add(slotColor + this.prefix + preview);
+                }
+            }
+        }
+
+        if (!this.miscCooldowns.isEmpty()) {
+            lines.add(this.miscSeparator);
+
+            for (CooldownEntry entry : this.miscCooldowns.values()) {
+                lines.add(entry.color + "" + ChatColor.STRIKETHROUGH + entry.name);
+            }
+        }
+
+        this.board.updateLines(lines);
+    }
+
+    private static class CooldownEntry {
+        final ChatColor color;
+        final String name;
+
+        CooldownEntry(ChatColor color, String name) {
+            this.color = color;
+            this.name = name;
+        }
+    }
 }

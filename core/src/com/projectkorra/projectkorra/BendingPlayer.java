@@ -902,7 +902,6 @@ public class BendingPlayer extends OfflineBendingPlayer {
 
 		if (ProjectKorra.isFolia()) {
 			ThreadUtil.ensureEntityTimer(this.player, new FoliaThreadChecker(this.player), 1L, 1L);
-			return; //TODO Folia doesn't support scoreboards, ignore it
 		}
 
 		//Show the bending board 1 tick later. We do it 1 tick later because postLoad() is called BEFORE the player is loaded into the map,
@@ -911,7 +910,7 @@ public class BendingPlayer extends OfflineBendingPlayer {
 			BendingBoardManager.getBoard(this.player).ifPresent(BendingBoard::show);
 			//Hide the board if they spawn in a world with bending disabled
 			BendingBoardManager.changeWorld(this.player);
-		}, 1L);
+		}, 6L);
 	}
 
 
