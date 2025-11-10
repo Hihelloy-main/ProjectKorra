@@ -28,6 +28,9 @@ import org.bukkit.block.data.Snowable;
 
 import com.projectkorra.projectkorra.GeneralMethods;
 
+/**
+ * Utility class for the creation of temporary blocks
+ */
 public class TempBlock {
 
     private static final Map<Block, LinkedList<TempBlock>> instances_ = new HashMap<>();

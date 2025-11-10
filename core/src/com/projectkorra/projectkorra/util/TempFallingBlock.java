@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * TempFallingBlock is a utility class that allows for the creation and management of temporary falling blocks in Minecraft.
  * It provides methods to create, manage, and remove falling blocks, as well as to check if a falling block is a TempFallingBlock.
- * Compatible with Spigot, Paper, Folia and Java 8-25.
+ * Compatible with Spigot, Paper, Folia and Java 8-25 (likely to be compatible with higher or lower Java versions)
  */
 public class TempFallingBlock {
     public static ConcurrentHashMap<FallingBlock, TempFallingBlock> instances = new ConcurrentHashMap<>();
