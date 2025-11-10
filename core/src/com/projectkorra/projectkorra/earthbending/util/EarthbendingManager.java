@@ -19,6 +19,6 @@ public class EarthbendingManager implements Runnable {
 	public void run() {
 		RevertChecker.revertEarthBlocks(); //Folia safe now
 		Shockwave.progressAll(); //Nothing
-		Tremorsense.manage(Bukkit.getServer()); //Folia safe now
+		//Tremorsense.manage(Bukkit.getServer()); //Folia safe now
 	}
 }

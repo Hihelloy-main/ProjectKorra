@@ -1809,6 +1809,8 @@ public class GeneralMethods {
 		plugin.getServer().getPluginManager().disablePlugin(plugin);
 	}
 
+
+
 	public static boolean locationEqualsIgnoreDirection(final Location loc1, final Location loc2) {
 		return loc1.getWorld().equals(loc2.getWorld()) && loc1.getX() == loc2.getX() && loc1.getY() == loc2.getY() && loc1.getZ() == loc2.getZ();
 	}

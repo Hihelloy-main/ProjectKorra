@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -35,7 +36,7 @@ public class BendingBoard {
     private ChatColor altColor;
 
     private final Map<String, CooldownEntry> miscCooldowns = new LinkedHashMap<>();
-    private BukkitTask updateTask;
+    private Object updateTask;
 
     public BendingBoard(final BendingPlayer bPlayer) {
         this.bendingPlayer = bPlayer;
@@ -62,8 +63,10 @@ public class BendingBoard {
     }
 
     public void destroy() {
-        if (this.updateTask != null) {
-            this.updateTask.cancel();
+        if (this.updateTask != null && !ProjectKorra.isFolia()) {
+            ((BukkitTask) this.updateTask).cancel();
+        } else if (this.updateTask != null && ProjectKorra.isFolia()) {
+            ((ScheduledTask) this.updateTask).cancel();
         }
 
         if (this.board != null && !this.board.isDeleted()) {
