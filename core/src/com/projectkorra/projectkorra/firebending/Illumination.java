@@ -22,284 +22,282 @@ import com.projectkorra.projectkorra.Element;
 import com.projectkorra.projectkorra.Element.SubElement;
 import com.projectkorra.projectkorra.ability.FireAbility;
 import com.projectkorra.projectkorra.attribute.Attribute;
-import com.projectkorra.projectkorra.util.TempBlock;
+import com.projectkorra.projectkorra.util.ThreadUtil;
 import org.bukkit.inventory.ItemStack;
 
 public class Illumination extends FireAbility {
 
-	private static final Map<Block, Player> BLOCKS = new ConcurrentHashMap<>();
+    private static final Map<Block, Player> BLOCKS = new ConcurrentHashMap<>();
 
-	@Attribute(Attribute.COOLDOWN) @DayNightFactor(invert = true)
-	private long cooldown;
-	@Attribute(Attribute.RANGE) @DayNightFactor
-	private double range;
-	private int lightThreshold;
-	private int lightLevel;
-	private Block block;
-	private int oldLevel;
+    @Attribute(Attribute.COOLDOWN) @DayNightFactor(invert = true)
+    private long cooldown;
+    @Attribute(Attribute.RANGE) @DayNightFactor
+    private double range;
+    private int lightThreshold;
+    private int lightLevel;
+    private Block block;
+    private int oldLevel;
 
-	private static boolean MODERN = GeneralMethods.getMCVersion() >= 1170;
-	private static Material LIGHT;
+    private static boolean MODERN;
+    private static Material LIGHT;
 
-	public Illumination(final Player player) {
-		super(player);
+    static {
+        try {
+            MODERN = GeneralMethods.getMCVersion() >= 1170;
+        } catch (Throwable t) {
+            MODERN = false;
+        }
+        if (MODERN) {
+            try {
+                LIGHT = Material.getMaterial("LIGHT");
+                if (LIGHT == null) MODERN = false;
+            } catch (Throwable ignored) {
+                MODERN = false;
+            }
+        }
+    }
 
-		//Don't apply modifiers here, as this is active at all times and therefore needs
-		//to have the fields updated
-		this.range = getConfig().getDouble("Abilities.Fire.Illumination.Range");
-		this.cooldown = getConfig().getLong("Abilities.Fire.Illumination.Cooldown");
-		this.lightThreshold = getConfig().getInt("Abilities.Fire.Illumination.LightThreshold");
+    public Illumination(final Player player) {
+        super(player);
 
-		if (MODERN) { //If we are in 1.17 and can use light blocks instead of torches
-			this.lightLevel = getConfig().getInt("Abilities.Fire.Illumination.LightLevel");
+        if (player == null || !player.isOnline()) return;
 
-			if (LIGHT == null) {
-				LIGHT = Material.getMaterial("LIGHT");
-			}
-		}
+        this.range = getConfig().getDouble("Abilities.Fire.Illumination.Range");
+        this.cooldown = getConfig().getLong("Abilities.Fire.Illumination.Cooldown");
+        this.lightThreshold = getConfig().getInt("Abilities.Fire.Illumination.LightThreshold");
 
-		final Illumination oldIllumination = getAbility(player, Illumination.class);
-		if (oldIllumination != null) {
-			oldIllumination.remove();
-			return;
-		}
+        if (MODERN) {
+            this.lightLevel = getConfig().getInt("Abilities.Fire.Illumination.LightLevel");
+        }
 
-		if (this.bPlayer.isOnCooldown(this)) {
-			return;
-		}
+        final Illumination oldIllumination = getAbility(player, Illumination.class);
+        if (oldIllumination != null) {
+            ThreadUtil.ensureLocation(player.getLocation(), oldIllumination::remove);
+            return;
+        }
 
-		if (player.getLocation().getBlock().getLightLevel() < this.lightThreshold && (!MODERN || slotsFree(player)) && !isTremorsensing()) {
-			this.oldLevel = player.getLocation().getBlock().getLightLevel();
-			this.bPlayer.addCooldown(this);
-			this.set();
-			this.start();
-		}
+        if (this.bPlayer.isOnCooldown(this)) return;
 
-	}
+        // Schedule ability start safely on the player's region thread
+        ThreadUtil.ensureLocation(player.getLocation(), () -> {
+            if (!player.isOnline()) return;
 
-	@Override
-	public void progress() {
-		//A replacement for the canBendIgnoreBindsCooldowns. Since this is used a passive, it should not turn off when bending is toggled.
-		if (!this.bPlayer.canBind(this) || this.bPlayer.isChiBlocked() || this.bPlayer.isParalyzed()
-				|| this.bPlayer.isBloodbent() || this.bPlayer.isControlledByMetalClips()
-				|| getConfig().getStringList("Properties.DisabledWorlds").contains(player.getLocation().getWorld().getName())) {
-			this.remove();
-			return;
-		}
+            if (player.getLocation().getBlock().getLightLevel() < this.lightThreshold
+                    && (!MODERN || slotsFree(player))
+                    && !isTremorsensing()) {
 
-		if (!this.bPlayer.isIlluminating()) {
-			this.remove();
-			return;
-		}
+                try {
+                    this.oldLevel = player.getLocation().getBlock().getLightLevel();
+                } catch (Throwable ignored) {}
 
-		if (isTremorsensing()) {
-			this.remove();
-			return;
-		}
+                this.bPlayer.addCooldown(this);
+                this.start();
+                this.set();
+            }
+        });
+    }
 
-		if (WaterAbility.isWater(getLocation().getBlock())) {
-			this.remove();
-			return;
-		}
+    @Override
+    public void progress() {
+        if (!this.bPlayer.canBind(this) || this.bPlayer.isChiBlocked() || this.bPlayer.isParalyzed()
+                || this.bPlayer.isBloodbent() || this.bPlayer.isControlledByMetalClips()
+                || getConfig().getStringList("Properties.DisabledWorlds").contains(player.getLocation().getWorld().getName())
+                || !this.bPlayer.isIlluminating()
+                || isTremorsensing()
+                || WaterAbility.isWater(getLocation().getBlock())
+        ) {
+            this.remove();
+            return;
+        }
 
-		if (this.block == null) {
-			this.remove();
-			return;
-		}
+        this.set();
+    }
 
-		//If light blocks are supported
-		if (MODERN) {
-			ItemStack main = player.getInventory().getItemInMainHand();
-			if (!slotsFree(player)) {
-				this.remove();
-				return;
-			}
+    private boolean isTremorsensing() {
+        return this.bPlayer.hasElement(Element.EARTH) && this.bPlayer.isTremorSensing()
+                && CoreAbility.getAbility(this.player, Tremorsense.class) != null
+                && CoreAbility.getAbility(this.player, Tremorsense.class).isGlowing();
+    }
 
-			Location hand = GeneralMethods.getMainHandLocation(player);
-			if (main.getType() != Material.AIR) hand = GeneralMethods.getOffHandLocation(player);
+    @Override
+    public void remove() {
+        super.remove();
+        this.revert();
+    }
 
-			//Only display every 5 ticks
-			if (getRunningTicks() % 3 == 0) playFirebendingParticles(hand, 1, 0, 0, 0);
-		}
+    private void revert() {
+        if (this.block == null) return;
 
-		this.set();
-	}
+        BLOCKS.remove(this.block);
 
-	public boolean isTremorsensing() {
-		return this.bPlayer.hasElement(Element.EARTH) && this.bPlayer.isTremorSensing()
-				&& CoreAbility.getAbility(this.player, Tremorsense.class) != null && CoreAbility.getAbility(this.player, Tremorsense.class).isGlowing();
-	}
+        final Block revertBlock = this.block;
+        ThreadUtil.ensureLocation(player.getLocation(), () -> {
+            try {
+                BlockData data = revertBlock.getBlockData();
+                revertBlock.getWorld().getPlayers().forEach(p -> p.sendBlockChange(revertBlock.getLocation(), data));
+            } catch (Throwable t) {
+                try {
+                    revertBlock.getWorld().getPlayers().forEach(p -> p.sendBlockChange(revertBlock.getLocation(), Material.AIR.createBlockData()));
+                } catch (Throwable ignored) {}
+            }
+        });
 
-	@Override
-	public void remove() {
-		super.remove();
-		this.revert();
-	}
+        this.block = null;
+    }
 
-	private void revert() {
-		if (this.block != null) {
-			BLOCKS.remove(this.block);
-			this.block.getWorld().getPlayers().forEach(p -> p.sendBlockChange(this.block.getLocation(), this.block.getBlockData()));
-		}
-	}
+    private void set() {
+        if (player == null || !player.isOnline()) return;
 
-	private void set() {
-		if (MODERN) { //Light block implementation
-			Block eyeBlock = this.player.getEyeLocation().getBlock();
-			int level = lightLevel;
-			if (!eyeBlock.getType().isAir() && (this.block == null || !this.block.equals(eyeBlock))) {
-				for (BlockFace face : new BlockFace[] {BlockFace.UP, BlockFace.DOWN, BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST}) {
-					if (eyeBlock.getRelative(face).getType().isAir() || (this.block != null && this.block.equals(eyeBlock.getRelative(face)))) {
-						eyeBlock = eyeBlock.getRelative(face);
-						level = lightLevel - 1; //Make the light level 1 less
-						break;
-					}
-				}
+        ThreadUtil.ensureLocation(player.getLocation(), () -> {
+            if (MODERN && LIGHT != null) {
+                setModernLight();
+            } else {
+                setLegacyTorch();
+            }
+        });
+    }
 
-				if (!eyeBlock.getType().isAir()) return; //Could not find suitable block
-			}
+    private void setModernLight() {
+        Block eyeBlock = this.player.getEyeLocation().getBlock();
+        int level = lightLevel;
 
-			BlockData clonedData = LIGHT.createBlockData();
-			((Levelled)clonedData).setLevel(level);
+        if (!eyeBlock.getType().isAir() && (this.block == null || !this.block.equals(eyeBlock))) {
+            for (BlockFace face : new BlockFace[]{BlockFace.UP, BlockFace.DOWN, BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST}) {
+                Block relative = eyeBlock.getRelative(face);
+                if (relative.getType().isAir() || (this.block != null && this.block.equals(relative))) {
+                    eyeBlock = relative;
+                    level = lightLevel - 1;
+                    break;
+                }
+            }
+            if (!eyeBlock.getType().isAir()) return;
+        }
 
-			if ((!eyeBlock.equals(this.block))) { //On block change
-				this.revert();
+        BlockData clonedData;
+        try {
+            clonedData = LIGHT.createBlockData();
+            if (clonedData instanceof Levelled) ((Levelled) clonedData).setLevel(level);
+        } catch (Throwable t) {
+            return;
+        }
 
-				this.oldLevel = player.getLocation().getBlock().getLightLevel();
+        final Block newBlock = eyeBlock;
+        final BlockData finalData = clonedData;
 
-				if (this.oldLevel > this.lightThreshold) {
-					remove();
-					return;
-				}
+        this.revert(); // revert old block
+        try {
+            this.oldLevel = player.getLocation().getBlock().getLightLevel();
+        } catch (Throwable ignored) {}
 
-				this.block = eyeBlock;
-				this.block.getWorld().getPlayers().forEach(p -> p.sendBlockChange(this.block.getLocation(), clonedData));
-			} else if (getCurrentTick() % 10 == 0) { //Update to all players in the area every half a second anyway
-				//We have to set the block back to the actual one because if they couldn't render the initial block change,
-				//(due to it not being in render distance) then no further packets will modify the block either.
-				this.block.getWorld().getPlayers().forEach(p -> {
-					p.sendBlockChange(this.block.getLocation(), this.block.getBlockData());
-					p.sendBlockChange(this.block.getLocation(), clonedData);
-				});
-			}
-		} else { //Legacy 1.16 illumination
-			final Block standingBlock = this.player.getLocation().getBlock();
-			final Block bellowBlock = standingBlock.getRelative(BlockFace.DOWN);
-			if (!isIgnitable(standingBlock)) {
-				return;
-			} else if (standingBlock.equals(this.block)) {
-				return;
-			} else if (Tag.LEAVES.isTagged(bellowBlock.getType())) {
-				return;
-			} else if (standingBlock.getType().name().endsWith("_FENCE") || standingBlock.getType().name().endsWith("_FENCE_GATE") || standingBlock.getType().name().endsWith("_WALL") || standingBlock.getType() == Material.IRON_BARS || standingBlock.getType().name().endsWith("_PANE")) {
-				return;
-			}
+        if (this.oldLevel > this.lightThreshold) {
+            remove();
+            return;
+        }
 
-			Material torch = bPlayer.canUseSubElement(SubElement.BLUE_FIRE) ? Material.SOUL_TORCH : Material.TORCH;
+        this.block = newBlock;
+        BLOCKS.put(this.block, this.player);
+        this.block.getWorld().getPlayers().forEach(p -> p.sendBlockChange(this.block.getLocation(), finalData));
+    }
 
-			if (!standingBlock.equals(this.block)) { //On block change
-				this.revert();
+    private void setLegacyTorch() {
+        final Block standingBlock = this.player.getLocation().getBlock();
+        final Block bellowBlock = standingBlock.getRelative(BlockFace.DOWN);
 
-				this.oldLevel = player.getLocation().getBlock().getLightLevel();
-				if (this.oldLevel > this.lightThreshold) {
-					remove();
-					return;
-				}
+        if (!isIgnitable(standingBlock)) return;
+        if (standingBlock.equals(this.block)) return;
+        if (Tag.LEAVES.isTagged(bellowBlock.getType())) return;
+        if (standingBlock.getType().name().endsWith("_FENCE")
+                || standingBlock.getType().name().endsWith("_FENCE_GATE")
+                || standingBlock.getType().name().endsWith("_WALL")
+                || standingBlock.getType() == Material.IRON_BARS
+                || standingBlock.getType().name().endsWith("_PANE")) return;
 
-				this.block = standingBlock;
-				this.block.getWorld().getPlayers().forEach(p -> p.sendBlockChange(this.block.getLocation(), torch.createBlockData()));
-			} else if (getCurrentTick() % 10 == 0) { //Update to all players in the area every half a second anyway
-				//We have to set the block back to the actual one because if they couldn't render the initial block change,
-				//(due to it not being in render distance) then no further packets will modify the block either.
-				this.block.getWorld().getPlayers().forEach(p -> {
-					p.sendBlockChange(this.block.getLocation(), this.block.getBlockData());
-					p.sendBlockChange(this.block.getLocation(), torch.createBlockData());
-				});
-			}
-		}
+        final Material torch = bPlayer.canUseSubElement(SubElement.BLUE_FIRE) ? Material.SOUL_TORCH : Material.TORCH;
+        final Block newBlock = standingBlock;
 
-		BLOCKS.put(this.block, this.player);
-	}
+        this.revert();
+        try {
+            this.oldLevel = player.getLocation().getBlock().getLightLevel();
+        } catch (Throwable ignored) {}
 
-	@Override
-	public String getName() {
-		return "Illumination";
-	}
+        if (this.oldLevel > this.lightThreshold) {
+            remove();
+            return;
+        }
 
-	@Override
-	public Location getLocation() {
-		return this.player != null ? (MODERN ? this.player.getEyeLocation() : this.player.getLocation()) : null;
-	}
+        this.block = newBlock;
+        BLOCKS.put(this.block, this.player);
+        this.block.getWorld().getPlayers().forEach(p -> p.sendBlockChange(this.block.getLocation(), torch.createBlockData()));
+    }
 
-	@Override
-	public long getCooldown() {
-		return this.cooldown;
-	}
+    @Override
+    public String getName() {
+        return "Illumination";
+    }
 
-	@Override
-	public boolean isSneakAbility() {
-		return false;
-	}
+    @Override
+    public Location getLocation() {
+        return this.player != null ? (MODERN ? this.player.getEyeLocation() : this.player.getLocation()) : null;
+    }
 
-	@Override
-	public boolean isHarmlessAbility() {
-		return true;
-	}
+    @Override
+    public long getCooldown() {
+        return this.cooldown;
+    }
 
-	public double getRange() {
-		return this.range;
-	}
+    @Override
+    public boolean isSneakAbility() {
+        return false;
+    }
 
-	public void setRange(final double range) {
-		this.range = range;
-	}
+    @Override
+    public boolean isHarmlessAbility() {
+        return true;
+    }
 
-	public static boolean isModern() {
-		return MODERN;
-	}
+    public double getRange() {
+        return this.range;
+    }
 
-	public Block getBlock() {
-		return this.block;
-	}
+    public void setRange(final double range) {
+        this.range = range;
+    }
 
-	public void setBlock(final Block block) {
-		this.block = block;
-	}
+    public static boolean isModern() {
+        return MODERN;
+    }
 
-	public static Map<Block, Player> getBlocks() {
-		return BLOCKS;
-	}
+    public Block getBlock() {
+        return this.block;
+    }
 
-	/**
-	 * <b>Deprecated. Current Illumination uses fake Blocks, so this will always return false</b>
-	 * Returns whether the block provided is a torch created by Illumination
-	 *
-	 * @param block The block being tested
-	 */
-	@Deprecated
-	public static boolean isIlluminationTorch(final Block block) {
-		return false;
-	}
+    public static Map<Block, Player> getBlocks() {
+        return BLOCKS;
+    }
 
-	public void setCooldown(final long cooldown) {
-		this.cooldown = cooldown;
-	}
+    private static boolean slotsFree(Player player) {
+        if (player == null || player.getInventory() == null) return true;
+        ItemStack main = player.getInventory().getItemInMainHand();
+        ItemStack off = player.getInventory().getItemInOffHand();
+        return !(main != null && main.getType() != Material.AIR && off != null && off.getType() != Material.AIR);
+    }
 
-	private static boolean slotsFree(Player player) {
-		ItemStack main = player.getInventory().getItemInMainHand();
-		ItemStack off = player.getInventory().getItemInOffHand();
-		return !(main.getType() != Material.AIR && off.getType() != Material.AIR);
-	}
+    public static void slotChange(Player player) {
+        if (!MODERN) return;
+        if (CoreAbility.hasAbility(player, Illumination.class)) return;
 
-	public static void slotChange(Player player) {
-		if (!MODERN) return;
-		if (CoreAbility.hasAbility(player, Illumination.class)) return;
-		BendingPlayer bPlayer = BendingPlayer.getBendingPlayer(player);
-		Illumination dummy = (Illumination) CoreAbility.getAbility(Illumination.class);
-		if (!dummy.isEnabled() || !bPlayer.isIlluminating() || !bPlayer.canUsePassive(dummy) || !bPlayer.canBendPassive(dummy)) return;
-		if (!slotsFree(player)) return;
+        ThreadUtil.ensureLocation(player.getLocation(), () -> {
+            BendingPlayer bPlayer = BendingPlayer.getBendingPlayer(player);
+            if (bPlayer == null || !bPlayer.isIlluminating()) return;
 
-		new Illumination(player);
-	}
+            CoreAbility abilityRef = CoreAbility.getAbility(Illumination.class);
+            if (!(abilityRef instanceof Illumination)) return;
+            Illumination dummy = (Illumination) abilityRef;
 
+            if (!dummy.isEnabled() || !bPlayer.canUsePassive(dummy) || !bPlayer.canBendPassive(dummy)) return;
+            if (!slotsFree(player)) return;
+
+            new Illumination(player);
+        });
+    }
 }

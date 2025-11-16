@@ -1338,93 +1338,110 @@ public class GeneralMethods {
 		}
 	}
 
-	public static void reloadPlugin(final CommandSender sender) {
-		ProjectKorra.log.info("Reloading ProjectKorra and configuration");
-		final BendingReloadEvent event = new BendingReloadEvent(sender);
-		Bukkit.getServer().getPluginManager().callEvent(event);
-		if (event.isCancelled()) {
-			sender.sendMessage(ChatColor.RED + "Reload event cancelled");
-			return;
-		}
-		if (DBConnection.isOpen()) {
-			DBConnection.sql.close();
-		}
-		GeneralMethods.stopBending();
+    public static void reloadPlugin(final CommandSender sender) {
+        ProjectKorra.log.info("Reloading ProjectKorra and configuration");
 
-		// Reverts all active lights, then restarts the light revert scheduler
-		LightManager.get().restart();
+        final BendingReloadEvent event = new BendingReloadEvent(sender);
+        Bukkit.getServer().getPluginManager().callEvent(event);
+        if (event.isCancelled()) {
+            sender.sendMessage(ChatColor.RED + "Reload event cancelled");
+            return;
+        }
 
-		ConfigManager.defaultConfig.reload();
-		ConfigManager.languageConfig.reload();
-		ConfigManager.presetConfig.reload();
-		ConfigManager.avatarStateConfig.reload();
-		Arrays.stream(Element.getElements()).forEach(e -> {e.setColor(null); e.setSubColor(null);}); //Load colors from config again
-		Arrays.stream(Element.getSubElements()).forEach(e -> {e.setColor(null); e.setSubColor(null);}); //Same for subs
-		ElementalAbility.clearBendableMaterials(); // Clear and re-cache the material lists on reload.
-		ElementalAbility.setupBendableMaterials();
-		// WaterAbility.setupWaterTransformableBlocks();
-		EarthTunnel.clearBendableMaterials();
+        if (DBConnection.isOpen()) {
+            DBConnection.sql.close();
+        }
 
+        // Stop all active abilities
+        GeneralMethods.stopBending();
 
-		if (ProjectKorra.isFolia()) {
-			Bukkit.getGlobalRegionScheduler().cancelTasks(ProjectKorra.plugin);
-			Bukkit.getAsyncScheduler().cancelTasks(ProjectKorra.plugin);
-		} else {
-			Bukkit.getScheduler().cancelTasks(ProjectKorra.plugin);
+        // --- CLEAN UP TEMP BLOCKS AND FALLING BLOCKS ---
+        try {
+            TempFallingBlock.removeAllFallingBlocks(); // removes all falling blocks safely
+            TempBlock.removeAll(); // reverts all temp blocks safely
+        } catch (Exception ex) {
+            ProjectKorra.log.warning("Error cleaning up TempBlocks/TempFallingBlocks during reload: " + ex.getMessage());
+        }
 
-			ProjectKorra.plugin.revertChecker = ProjectKorra.plugin.getServer().getScheduler().runTaskTimerAsynchronously(ProjectKorra.plugin, new RevertChecker(ProjectKorra.plugin), 0, 200);
-		}
+        // Reverts all active lights
+        LightManager.get().restart();
 
-		new BendingManager();
+        // Reload configs
+        ConfigManager.defaultConfig.reload();
+        ConfigManager.languageConfig.reload();
+        ConfigManager.presetConfig.reload();
+        ConfigManager.avatarStateConfig.reload();
 
-		//Hihelloy contrib start
+        // Reset element colors
+        Arrays.stream(Element.getElements()).forEach(e -> { e.setColor(null); e.setSubColor(null); });
+        Arrays.stream(Element.getSubElements()).forEach(e -> { e.setColor(null); e.setSubColor(null); });
+
+        // Reset bendable materials
+        ElementalAbility.clearBendableMaterials();
+        ElementalAbility.setupBendableMaterials();
+        EarthTunnel.clearBendableMaterials();
+
+        // Cancel old scheduled tasks
+        if (ProjectKorra.isFolia()) {
+            Bukkit.getGlobalRegionScheduler().cancelTasks(ProjectKorra.plugin);
+            Bukkit.getAsyncScheduler().cancelTasks(ProjectKorra.plugin);
+        } else {
+            Bukkit.getScheduler().cancelTasks(ProjectKorra.plugin);
+            ProjectKorra.plugin.revertChecker = ProjectKorra.plugin.getServer()
+                    .getScheduler().runTaskTimerAsynchronously(ProjectKorra.plugin, new RevertChecker(ProjectKorra.plugin), 0, 200);
+        }
+
+        // Re-register managers and abilities
+        new BendingManager();
         ThreadUtil.runSyncTimer(new BendingManager(), 0, 1);
         ThreadUtil.runSyncTimer(new AirbendingManager(plugin), 0, 1);
         ThreadUtil.runSyncTimer(new WaterbendingManager(plugin), 0, 1);
         ThreadUtil.runSyncTimer(new EarthbendingManager(plugin), 0, 1);
         ThreadUtil.runSyncTimer(new FirebendingManager(plugin), 0, 1);
         ThreadUtil.runSyncTimer(new ChiblockingManager(plugin), 0, 1);
-        //Hihelloy contrib end
 
-		EarthTunnel.setupBendableMaterials();
-		Bloodbending.loadBloodlessFromConfig();
-		Preset.loadExternalPresets();
-		new MultiAbilityManager();
-		new ComboManager();
-		PKCommand.reloadCommands();
-		// Stop the previous collision detection task before creating new manager.
-		ProjectKorra.collisionManager.stopCollisionDetection();
-		ProjectKorra.collisionManager = new CollisionManager();
-		ProjectKorra.collisionInitializer = new CollisionInitializer(ProjectKorra.collisionManager);
-		HandlerList.unregisterAll(ProjectKorra.plugin); //Unregister all listeners registered by addons AND ProjectKorra
-		Bukkit.getPluginManager().registerEvents(new PKListener(ProjectKorra.plugin), ProjectKorra.plugin); //Re-register our listener
-		CoreAbility.registerAbilities(); //Register all abilities again
-		reloadAddonPlugins();  //Register all addons and addon listeners again
-		ProjectKorra.collisionInitializer.initializeDefaultCollisions(); // must be called after abilities have been registered.
-		ProjectKorra.collisionManager.startCollisionDetection();
+        EarthTunnel.setupBendableMaterials();
+        Bloodbending.loadBloodlessFromConfig();
+        Preset.loadExternalPresets();
+        new MultiAbilityManager();
+        new ComboManager();
+        PKCommand.reloadCommands();
 
-		DBConnection.init();
+        ProjectKorra.collisionManager.stopCollisionDetection();
+        ProjectKorra.collisionManager = new CollisionManager();
+        ProjectKorra.collisionInitializer = new CollisionInitializer(ProjectKorra.collisionManager);
 
-		if (!DBConnection.isOpen()) {
-			ProjectKorra.log.severe("Unable to enable ProjectKorra due to the database not being open");
-			stopPlugin();
-		}
-		BendingPlayer.getOfflinePlayers().clear();
-		BendingPlayer.getPlayers().clear();
-		OfflineBendingPlayer.TEMP_ELEMENTS.clear();
-		BendingPlayer.DISABLED_WORLDS = new HashSet<>(ConfigManager.defaultConfig.get().getStringList("Properties.DisabledWorlds"));
-		BendingBoardManager.reload();
-		for (final Player player : Bukkit.getOnlinePlayers()) {
-			Preset.unloadPreset(player);
-			OfflineBendingPlayer.loadAsync(player.getUniqueId(), false);
-			PassiveManager.registerPassives(player);
-		}
+        HandlerList.unregisterAll(ProjectKorra.plugin);
+        Bukkit.getPluginManager().registerEvents(new PKListener(ProjectKorra.plugin), ProjectKorra.plugin);
+        CoreAbility.registerAbilities();
+        reloadAddonPlugins();
+        ProjectKorra.collisionInitializer.initializeDefaultCollisions();
+        ProjectKorra.collisionManager.startCollisionDetection();
 
-		plugin.updater.checkUpdate();
-		ProjectKorra.log.info("Reload complete");
-	}
+        DBConnection.init();
+        if (!DBConnection.isOpen()) {
+            ProjectKorra.log.severe("Unable to enable ProjectKorra due to the database not being open");
+            stopPlugin();
+        }
 
-	public static void reloadAddonPlugins() {
+        BendingPlayer.getOfflinePlayers().clear();
+        BendingPlayer.getPlayers().clear();
+        OfflineBendingPlayer.TEMP_ELEMENTS.clear();
+        BendingPlayer.DISABLED_WORLDS = new HashSet<>(ConfigManager.defaultConfig.get().getStringList("Properties.DisabledWorlds"));
+        BendingBoardManager.reload();
+
+        for (final Player player : Bukkit.getOnlinePlayers()) {
+            Preset.unloadPreset(player);
+            OfflineBendingPlayer.loadAsync(player.getUniqueId(), false);
+            PassiveManager.registerPassives(player);
+        }
+
+        plugin.updater.checkUpdate();
+        ProjectKorra.log.info("Reload complete");
+    }
+
+
+    public static void reloadAddonPlugins() {
 		for (int i = CoreAbility.getAddonPlugins().size() - 1; i > -1; i--) {
 			final String entry = CoreAbility.getAddonPlugins().get(i);
 			final String[] split = entry.split("::");
