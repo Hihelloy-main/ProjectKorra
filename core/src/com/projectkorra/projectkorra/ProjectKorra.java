@@ -4,8 +4,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.logging.Logger;
 
-import com.hihelloy.work.PaperRunnable;
-import com.hihelloy.work.Runnables;
+
 import com.projectkorra.projectkorra.hooks.PlanExtension;
 import com.projectkorra.projectkorra.region.RegionProtection;
 import com.projectkorra.projectkorra.util.ThreadUtil;
@@ -171,7 +170,6 @@ public class ProjectKorra extends JavaPlugin {
 		if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
 			papiHook.unregister();
 		}
-        Bukkit.getLogger().info("Hey");
 	}
 
 	@Override

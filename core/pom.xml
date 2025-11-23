@@ -90,6 +90,11 @@
             <url>https://nexus.phoenixdevt.fr/repository/maven-public/</url>
         </repository>
 
+        <repository>
+            <id>william278.net</id>
+            <url>https://repo.william278.net/releases</url>
+        </repository>
+
     </repositories>
 
     <dependencies>
@@ -97,6 +102,12 @@
             <groupId>com.projectkorra</groupId>
             <artifactId>core-modern</artifactId>
             <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>net.william278.husktowns</groupId>
+            <artifactId>husktowns-bukkit</artifactId>
+            <version>3.1.4</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>com.projectkorra</groupId>
