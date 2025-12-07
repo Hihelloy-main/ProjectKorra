@@ -12,50 +12,75 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Consumer;
 
 /**
  * TempFallingBlock is a utility class that allows for the creation and management of temporary falling blocks in Minecraft.
  * It provides methods to create, manage, and remove falling blocks, as well as to check if a falling block is a TempFallingBlock.
+ * Compatible with Spigot, Paper, Folia and Java 8-25 (likely to be compatible with higher or lower Java versions)
  */
 public class TempFallingBlock {
     public static ConcurrentHashMap<FallingBlock, TempFallingBlock> instances = new ConcurrentHashMap<>();
     public static ConcurrentHashMap<CoreAbility, Set<TempFallingBlock>> instancesByAbility = new ConcurrentHashMap<>();
 
-    private FallingBlock fallingblock;
-    private CoreAbility ability;
-    private long creation;
-    private boolean expire;
-    private Consumer<TempFallingBlock> onPlace;
+    private final FallingBlock fallingblock;
+    private final CoreAbility ability;
+    private final long creation;
+    private final boolean expire;
+    private OnPlaceCallback onPlace;
 
     public TempFallingBlock(Location location, BlockData data, Vector velocity, CoreAbility ability) {
         this(location, data, velocity, ability, false);
     }
 
     public TempFallingBlock(Location location, BlockData data, Vector velocity, CoreAbility ability, boolean expire) {
+        if (location == null || location.getWorld() == null) {
+            throw new IllegalArgumentException("Location and world cannot be null");
+        }
+
+        if (data == null) {
+            throw new IllegalArgumentException("BlockData cannot be null");
+        }
+
+        if (ability == null) {
+            throw new IllegalArgumentException("CoreAbility cannot be null");
+        }
+
         this.fallingblock = location.getWorld().spawnFallingBlock(location, data.clone());
-        this.fallingblock.setVelocity(velocity);
+        this.fallingblock.setVelocity(velocity != null ? velocity : new Vector(0, 0, 0));
         this.fallingblock.setDropItem(false);
         this.ability = ability;
         this.creation = System.currentTimeMillis();
         this.expire = expire;
-        instances.put(fallingblock, this);
-        if (!instancesByAbility.containsKey(ability)) {
-            instancesByAbility.put(ability, new HashSet<>());
-        }
-        instancesByAbility.get(ability).add(this);
+        this.onPlace = null;
 
+        instances.put(this.fallingblock, this);
+
+        if (!instancesByAbility.containsKey(this.ability)) {
+            instancesByAbility.put(this.ability, new HashSet<TempFallingBlock>());
+        }
+
+        Set<TempFallingBlock> abilitySet = instancesByAbility.get(this.ability);
+        if (abilitySet != null) {
+            abilitySet.add(this);
+        }
     }
 
     public static void manage() {
         long time = System.currentTimeMillis();
+        List<TempFallingBlock> toRemove = new ArrayList<TempFallingBlock>();
 
         for (TempFallingBlock tfb : instances.values()) {
-            if (tfb.canExpire() && time > tfb.getCreationTime() + 5000) {
-                tfb.remove();
-            } else if (time > tfb.getCreationTime() + 120000) { // Add a hard timeout for any abilities that misuse this.
-                tfb.remove();
+            long timeSinceCreation = time - tfb.getCreationTime();
+
+            if (tfb.canExpire() && timeSinceCreation > 5000) {
+                toRemove.add(tfb);
+            } else if (timeSinceCreation > 120000) {
+                toRemove.add(tfb);
             }
+        }
+
+        for (TempFallingBlock tfb : toRemove) {
+            tfb.remove();
         }
     }
 
@@ -66,124 +91,129 @@ public class TempFallingBlock {
         return null;
     }
 
-    /**
-     * Check if the falling block is a TempFallingBlock.
-     * @param fallingblock The falling block to check.
-     * @return True if the falling block is a TempFallingBlock, false otherwise.
-     */
     public static boolean isTempFallingBlock(FallingBlock fallingblock) {
-        return instances.containsKey(fallingblock);
+        return fallingblock != null && instances.containsKey(fallingblock);
     }
 
-    /**
-     * Remove a TempFallingBlock from the world.
-     * @param fallingblock The falling block to remove.
-     */
     public static void removeFallingBlock(FallingBlock fallingblock) {
         if (isTempFallingBlock(fallingblock)) {
-            TempFallingBlock tempFallingBlock = instances.get(fallingblock);
-            ThreadUtil.ensureEntity(fallingblock, fallingblock::remove);
+            final TempFallingBlock tempFallingBlock = instances.get(fallingblock);
+
+            ThreadUtil.ensureEntity(fallingblock, new Runnable() {
+                @Override
+                public void run() {
+                    if (!fallingblock.isDead()) {
+                        fallingblock.remove();
+                    }
+                }
+            });
+
             instances.remove(fallingblock);
-            instancesByAbility.get(tempFallingBlock.ability).remove(tempFallingBlock);
-            if (instancesByAbility.get(tempFallingBlock.ability).isEmpty()) {
-                instancesByAbility.remove(tempFallingBlock.ability);
+
+            if (tempFallingBlock.ability != null) {
+                Set<TempFallingBlock> abilitySet = instancesByAbility.get(tempFallingBlock.ability);
+                if (abilitySet != null) {
+                    abilitySet.remove(tempFallingBlock);
+                    if (abilitySet.isEmpty()) {
+                        instancesByAbility.remove(tempFallingBlock.ability);
+                    }
+                }
             }
         }
     }
 
-    /**
-     * Remove all TempFallingBlocks from the world.
-     */
     public static void removeAllFallingBlocks() {
-        for (FallingBlock fallingblock : instances.keySet()) {
-            ThreadUtil.ensureEntity(fallingblock, fallingblock::remove);
+        List<FallingBlock> blocks = new ArrayList<FallingBlock>(instances.keySet());
+
+        for (final FallingBlock fallingblock : blocks) {
+            ThreadUtil.ensureEntity(fallingblock, new Runnable() {
+                @Override
+                public void run() {
+                    if (!fallingblock.isDead()) {
+                        fallingblock.remove();
+                    }
+                }
+            });
         }
+
         instances.clear();
         instancesByAbility.clear();
     }
 
-    /**
-     * Get all TempFallingBlocks associated with a specific ability.
-     * @param ability The ability to get TempFallingBlocks for.
-     * @return A set of TempFallingBlocks associated with the ability.
-     */
     public static Set<TempFallingBlock> getFromAbility(CoreAbility ability) {
-        return instancesByAbility.getOrDefault(ability, new HashSet<>());
+        Set<TempFallingBlock> set = instancesByAbility.get(ability);
+        return set != null ? set : new HashSet<TempFallingBlock>();
     }
 
-    /**
-     * Remove this TempFallingBlock from the world.
-     */
     public void remove() {
-        ThreadUtil.ensureEntity(fallingblock, fallingblock::remove);
-        instances.remove(fallingblock);
-    }
+        ThreadUtil.ensureEntity(this.fallingblock, new Runnable() {
+            @Override
+            public void run() {
+                if (!TempFallingBlock.this.fallingblock.isDead()) {
+                    TempFallingBlock.this.fallingblock.remove();
+                }
+            }
+        });
 
-    /**
-     * Get the falling block associated with this TempFallingBlock.
-     * @return The falling block.
-     */
-    public FallingBlock getFallingBlock() {
-        return fallingblock;
-    }
+        instances.remove(this.fallingblock);
 
-    /**
-     * Get the ability associated with this TempFallingBlock.
-     * @return The ability.
-     */
-    public CoreAbility getAbility() {
-        return ability;
-    }
-
-    public Material getMaterial() {
-        return fallingblock.getBlockData().getMaterial();
-    }
-
-    public BlockData getMaterialData() {
-        return fallingblock.getBlockData();
-    }
-
-    public BlockData getData() {
-        return fallingblock.getBlockData();
-    }
-
-    public Location getLocation() {
-        return fallingblock.getLocation();
-    }
-
-    public long getCreationTime() {
-        return creation;
-    }
-
-    public boolean canExpire() {
-        return expire;
-    }
-
-    /**
-     * This method is called automatically when the falling block tries to be
-     * placed in the world. It will call the onPlace consumer if it is set.
-     */
-    public void tryPlace() {
-        if (onPlace != null) {
-            onPlace.accept(this);
+        Set<TempFallingBlock> abilitySet = instancesByAbility.get(this.ability);
+        if (abilitySet != null) {
+            abilitySet.remove(this);
+            if (abilitySet.isEmpty()) {
+                instancesByAbility.remove(this.ability);
+            }
         }
     }
 
-    /**
-     * Get the onPlace callback for this TempFallingBlock. This will be called
-     * when the falling block tries to be placed in the world.
-     * @return The onPlace consumer, or null.
-     */
-    public Consumer<TempFallingBlock> getOnPlace() {
-        return onPlace;
+    public FallingBlock getFallingBlock() {
+        return this.fallingblock;
     }
 
-    /**
-     * Set the onPlace callback for this TempFallingBlock. This will be called
-     * when the falling block tries to be placed in the world.
-     * @param onPlace The consumer to set.
-     */
-    public void setOnPlace(Consumer<TempFallingBlock> onPlace) {
+    public CoreAbility getAbility() {
+        return this.ability;
+    }
+
+    public Material getMaterial() {
+        return this.fallingblock.getBlockData().getMaterial();
+    }
+
+    public BlockData getMaterialData() {
+        return this.fallingblock.getBlockData();
+    }
+
+    public BlockData getData() {
+        return this.fallingblock.getBlockData();
+    }
+
+    public Location getLocation() {
+        return this.fallingblock.getLocation();
+    }
+
+    public long getCreationTime() {
+        return this.creation;
+    }
+
+    public boolean canExpire() {
+        return this.expire;
+    }
+
+    public void tryPlace() {
+        if (this.onPlace != null) {
+            this.onPlace.onPlace(this);
+        }
+    }
+
+    public OnPlaceCallback getOnPlace() {
+        return this.onPlace;
+    }
+
+    public void setOnPlace(OnPlaceCallback onPlace) {
         this.onPlace = onPlace;
+    }
+
+    @FunctionalInterface
+    public interface OnPlaceCallback {
+        void onPlace(TempFallingBlock tempFallingBlock);
     }
 }

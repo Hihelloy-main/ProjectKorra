@@ -1,21 +1,26 @@
 package com.projectkorra.projectkorra.ability.util;
 
+import com.projectkorra.projectkorra.BendingPlayer;
 import com.projectkorra.projectkorra.ProjectKorra;
+import com.projectkorra.projectkorra.ability.StanceAbility;
+import com.projectkorra.projectkorra.event.PlayerChangeRegionEvent;
+import com.projectkorra.projectkorra.util.PaperLib;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
-/**
- * This is a runnable that fixes and restarts passives when a player
- * changes regions in Folia.
- */
+import java.util.concurrent.ExecutionException;
+
 public class FoliaThreadChecker implements Runnable {
 
-    private Player player;
+    private final Player player;
     private Location oldLocation;
+    private StanceAbility oldStance;
 
     public FoliaThreadChecker(Player player) {
         this.player = player;
+        this.oldLocation = null;
+        this.oldStance = null;
     }
 
     @Override
@@ -26,15 +31,50 @@ public class FoliaThreadChecker implements Runnable {
             return;
         }
 
-        if (this.oldLocation != null && !Bukkit.isOwnedByCurrentRegion(oldLocation)) {
+        Location currentLocation = player.getLocation();
+
+        if (oldLocation != null && !Bukkit.isOwnedByCurrentRegion(oldLocation)) {
+
+            PlayerChangeRegionEvent event = new PlayerChangeRegionEvent(player, oldLocation, currentLocation);
+            Bukkit.getPluginManager().callEvent(event);
+
+            if (event.isCancelled()) {
+                restoreOldStance();
+                player.teleportAsync(oldLocation);
+                try {
+                    PaperLib.getChunkAtAsync(oldLocation).get().unload();
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                } catch (ExecutionException e) {
+                    throw new RuntimeException(e);
+                }
+                return;
+            }
+
+            saveOldStance();
             ProjectKorra.log.info(player.getName() + " changed regions. Restarting passives.");
             onChangeRegion();
+            restoreOldStance();
         }
 
-        this.oldLocation = player.getLocation();
+        this.oldLocation = currentLocation;
+    }
+
+    private void saveOldStance() {
+        BendingPlayer bPlayer = BendingPlayer.getBendingPlayer(player);
+        if (bPlayer != null) {
+            oldStance = bPlayer.getStance();
+        }
+    }
+
+    private void restoreOldStance() {
+        BendingPlayer bPlayer = BendingPlayer.getBendingPlayer(player);
+        if (bPlayer != null && oldStance != null) {
+            bPlayer.setStance(oldStance);
+        }
     }
 
     public void onChangeRegion() {
-        PassiveManager.registerPassives(this.player);
+        PassiveManager.registerPassives(player);
     }
 }
